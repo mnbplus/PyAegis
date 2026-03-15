@@ -37,6 +37,11 @@ dev = [
 [project.scripts]
 pyaegis = "pyaegis.cli:main"
 
+# Explicit package discovery to avoid setuptools failing on extra top-level dirs
+# (e.g. the generated "site/" docs folder).
+[tool.setuptools]
+packages = ["pyaegis", "pyaegis.core", "pyaegis.integrations", "pyaegis.rules"]
+
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q"
