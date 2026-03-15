@@ -621,6 +621,12 @@ class SARIFReporter:
                             ),
                         }
                     ],
+                    "originalUriBaseIds": {
+                        "%SRCROOT%": {
+                            "uri": "",
+                            "description": {"text": "Repository root"},
+                        }
+                    },
                     "results": sarif_results,
                     "properties": {
                         "totalFiles": result.total_files,
@@ -693,11 +699,6 @@ class SARIFReporter:
                 uri = uri.lstrip("/")
         level = _severity_to_sarif_level(finding.severity)
 
-        fix_obj = {
-            "description": {"text": meta["fix"]},
-            "artifactChanges": [],
-        }
-
         snippet = _read_snippet(finding.file_path, finding.line_number)
 
         result: Dict[str, Any] = {
@@ -716,11 +717,18 @@ class SARIFReporter:
                             "uri": uri,
                             "uriBaseId": "%SRCROOT%",
                         },
-                        "region": {
-                            "startLine": finding.line_number,
-                            "startColumn": 1,
-                            "snippet": {"text": snippet} if snippet else None,
-                        },
+                        "region": (
+                            {
+                                "startLine": finding.line_number,
+                                "startColumn": 1,
+                                "snippet": {"text": snippet},
+                            }
+                            if snippet
+                            else {
+                                "startLine": finding.line_number,
+                                "startColumn": 1,
+                            }
+                        ),
                     },
                     "logicalLocations": [
                         {
@@ -733,7 +741,6 @@ class SARIFReporter:
             "partialFingerprints": {
                 "primaryLocationLineHash": f"{finding.rule_id}:{uri}:{finding.line_number}"
             },
-            "fixes": [fix_obj],
             "properties": {
                 "severity": finding.severity,
                 "sourceVariable": finding.source_var,
@@ -741,8 +748,7 @@ class SARIFReporter:
                 "cwe": meta["cwe"],
             },
         }
-        if result["locations"][0]["physicalLocation"]["region"]["snippet"] is None:
-            result["locations"][0]["physicalLocation"]["region"].pop("snippet")
+        # snippet handling is done inline above; no post-processing needed
         return result
 
 
