@@ -4,6 +4,77 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from pyaegis.models import Finding
+from pyaegis.rules_catalog import get_rule
+
+
+# Mapping from sink patterns to stable rule IDs.
+# Keep this simple and conservative: if a sink matches multiple groups,
+# the first match in order wins.
+_RULE_GROUPS: List[Tuple[str, List[str]]] = [
+    ("PYA-003", ["eval", "exec", "compile", "builtins.eval", "builtins.exec", "runpy.*"]),
+    ("PYA-001", ["os.system", "os.popen", "os.spawn*", "subprocess.*", "commands.getoutput"]),
+    ("PYA-004", [
+        "pickle.load",
+        "pickle.loads",
+        "cPickle.loads",
+        "dill.loads",
+        "marshal.loads",
+        "yaml.load",
+        "yaml.unsafe_load",
+        "ruamel.yaml.load",
+        "jsonpickle.decode",
+    ]),
+    ("PYA-005", [
+        "urllib.request.urlopen",
+        "urllib3.PoolManager.request",
+        "urllib3.request",
+        "requests.get",
+        "requests.post",
+        "requests.request",
+        "httpx.get",
+        "httpx.post",
+        "httpx.request",
+        "aiohttp.ClientSession.*",
+        "socket.create_connection",
+    ]),
+    ("PYA-006", [
+        "open",
+        "builtins.open",
+        "os.open",
+        "os.remove",
+        "os.unlink",
+        "os.rmdir",
+        "os.rename",
+        "os.replace",
+        "os.mkdir",
+        "os.makedirs",
+        "shutil.*",
+        "pathlib.Path*",
+        "tempfile.NamedTemporaryFile",
+    ]),
+    ("PYA-002", [
+        "sqlite3.Connection.execute",
+        "sqlite3.Cursor.execute",
+        "sqlite3.Cursor.executemany",
+        "psycopg2.connect",
+        "psycopg2.cursor.execute",
+        "MySQLdb.connect",
+        "pymysql.connect",
+        "sqlalchemy.text",
+    ]),
+]
+
+
+def _rule_id_for_sink(sink_name: str) -> str:
+    """Pick a stable rule id for the sink name."""
+    for rid, pats in _RULE_GROUPS:
+        for p in pats:
+            if p == sink_name:
+                return rid
+            if any(ch in p for ch in "*?[]") and fnmatch.fnmatch(sink_name, p):
+                return rid
+    return "PYA-999"
+
 
 
 @dataclass(frozen=True)
@@ -311,14 +382,20 @@ class TaintTracker:
                     if self._call_has_tainted_arg(
                         node, tainted_vars, fnmap, callstack, tainted_params
                     ):
+                        rule_id = _rule_id_for_sink(sink_name)
+                        sev = "CRITICAL"
+                        r = get_rule(rule_id)
+                        if r is not None:
+                            sev = r.severity
                         self.vulnerabilities.append(
                             Finding(
-                                rule_id="PYA-TAINT",
+                                rule_id=rule_id,
                                 description=f"Tainted data reaches sink: {sink_name}",
                                 file_path=filepath,
                                 line_number=getattr(node, "lineno", 0),
                                 sink_context=fnctx.name,
-                                severity="CRITICAL",
+                                severity=sev,
+                                sink_name=sink_name,
                             )
                         )
 

@@ -77,7 +77,7 @@
 2. **Parse** — build an AST for each file in parallel.
 3. **Model** — extract per-function bodies, args, and call graphs.
 4. **Taint** — seed sources, propagate through the function, detect when taint reaches a sink.
-5. **Report** — emit findings as `text`, `json`, or `sarif`.
+5. **Report** — emit findings as `text`, `json`, `csv`, `html`, or `sarif`.
 
 ---
 
@@ -187,24 +187,54 @@ PyAegis ships with a comprehensive default ruleset covering the most critical Py
 pip install pyaegis
 ```
 
-**Scan a directory:**
+**Scan the current directory (recommended):**
+```bash
+pyaegis scan .
+```
+
+**Backwards compatible (still works):**
 ```bash
 pyaegis .
 ```
 
-**With custom rules:**
+**Only show high/critical findings:**
 ```bash
-pyaegis . --rules custom_rules.yml
+pyaegis scan . --severity HIGH,CRITICAL
+```
+
+**Explain a rule / remediation guidance:**
+```bash
+pyaegis explain PYA-001
+```
+
+**List built-in rules:**
+```bash
+pyaegis list-rules
+```
+
+**Create a project config file (.pyaegis.yml):**
+```bash
+pyaegis init
 ```
 
 **Export SARIF for GitHub Advanced Security:**
 ```bash
-pyaegis . --format sarif --output results.sarif
+pyaegis scan . --format sarif --output results.sarif
 ```
 
 **Export JSON:**
 ```bash
-pyaegis . --format json --output results.json
+pyaegis scan . --format json --output results.json
+```
+
+**Export CSV:**
+```bash
+pyaegis scan . --format csv --output results.csv
+```
+
+**Export HTML report:**
+```bash
+pyaegis scan . --format html --output report.html
 ```
 
 ---
@@ -306,7 +336,7 @@ pyaegis <target> [options]
 |------|-------------|---------|
 | `target` | File or directory to scan | — |
 | `--rules` | Path to YAML rules file | `pyaegis/rules/default.yml` |
-| `--format` | Output format: `text`, `json`, `sarif` | `text` |
+| `--format` | Output format: `text`, `json`, `csv`, `html`, `sarif` | `text` |
 | `--output` | Output file (omit for stdout) | stdout |
 | `--debug` | Verbose logging | off |
 

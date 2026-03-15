@@ -13,6 +13,7 @@ class Finding:
     sink_context: str
     severity: str = "CRITICAL"
     source_var: str = ""
+    sink_name: str = ""
 
 
 @dataclass

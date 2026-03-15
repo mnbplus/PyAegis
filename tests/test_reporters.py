@@ -4,6 +4,8 @@ from pyaegis.models import Finding, ScanResult
 from pyaegis.reporters import (
     TextReporter,
     JSONReporter,
+    CSVReporter,
+    HTMLReporter,
     SARIFReporter,
 )
 
