@@ -1,0 +1,13 @@
+inputs:
+  - input
+  - request
+  - os.getenv
+  - sys.argv
+sinks:
+  - eval
+  - exec
+  - os.system
+  - os.popen
+  - subprocess.Popen
+  - subprocess.call
+  - sqlite3.connect().execute
