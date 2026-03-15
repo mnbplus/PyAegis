@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -95,6 +96,59 @@ def _finding_to_dict(f: Any) -> Dict[str, Any]:
     }
 
 
+def _findings_to_csv(findings: List[Any]) -> str:
+    """Convert findings to a CSV string (header + rows)."""
+    import csv
+    import io
+
+    output = io.StringIO()
+    fieldnames = [
+        "rule_id",
+        "severity",
+        "message",
+        "filename",
+        "line",
+        "sink_name",
+        "source_var",
+        "sink_context",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for f in findings:
+        row = _finding_to_dict(f)
+        writer.writerow(
+            {
+                "rule_id": row.get("rule_id", ""),
+                "severity": row.get("severity", ""),
+                "message": row.get("message", ""),
+                "filename": row.get("filename", ""),
+                "line": row.get("line", 0),
+                "sink_name": row.get("sink_name", ""),
+                "source_var": row.get("source_var", ""),
+                "sink_context": row.get("sink_context", ""),
+            }
+        )
+    return output.getvalue()
+
+
+def _findings_to_json_payload(
+    findings: List[Any],
+    *,
+    total_files: int,
+    duration_seconds: float,
+) -> Dict[str, Any]:
+    """Return a JSON-serializable payload with scan metadata + findings."""
+    return {
+        "meta": {
+            "scan_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "total_files_scanned": total_files,
+            "duration_seconds": float(f"{duration_seconds:.3f}"),
+            "total_findings": len(findings),
+        },
+        "findings": [_finding_to_dict(f) for f in findings],
+    }
+
+
 def _sarif_level(severity: str) -> str:
     return {
         "CRITICAL": "error",
@@ -126,9 +180,7 @@ def _findings_to_sarif(
                     "shortDescription": {"text": rule_info.short_description},
                     "fullDescription": {"text": rule_info.full_description},
                     "helpUri": rule_info.help_uri,
-                    "defaultConfiguration": {
-                        "level": _sarif_level(rule_info.severity)
-                    },
+                    "defaultConfiguration": {"level": _sarif_level(rule_info.severity)},
                 }
             else:
                 sink = getattr(f, "sink_name", rule_id)
@@ -217,9 +269,11 @@ def _format_findings(findings: List[Any], return_format: str) -> Any:
         return _findings_to_sarif(findings)
     if return_format == "text":
         return _findings_to_text(findings)
+    if return_format in {"json", "csv"}:
+        return [_finding_to_dict(f) for f in findings]
     raise ValueError(
         f"Unknown return_format {return_format!r}. "
-        "Choose 'dict', 'sarif', or 'text'."
+        "Choose 'dict', 'sarif', 'text', 'json', or 'csv'."
     )
 
 
@@ -283,7 +337,7 @@ def scan_code_string(
     *,
     filename: str = "<string>",
     ruleset: str = "default",
-    return_format: Literal["dict", "sarif", "text"] = "dict",
+    return_format: Literal["dict", "sarif", "text", "json", "csv"] = "dict",
     severity_filter: Optional[List[str]] = None,
 ) -> Any:
     """Scan a Python source code string for security vulnerabilities.
@@ -303,6 +357,8 @@ def scan_code_string(
                           ``filename``, ``line``, ``col``, ``severity``,
                           ``rule_id``, ``sink_name``, ``source_var``,
                           ``message``, ``sink_context``.
+            - ``"json"``: JSON-serializable payload with scan metadata + findings.
+            - ``"csv"``: CSV string with one finding per row.
             - ``"sarif"``: SARIF 2.1.0 dict (for IDE diagnostic integration).
             - ``"text"``: Human-readable string.
 
@@ -332,6 +388,7 @@ def scan_code_string(
     # PyASTParser reads from disk, so write to a named temp file.
     suffix = Path(filename).suffix or ".py"
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    start_time = time.time()
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
             fh.write(source_code)
@@ -353,9 +410,18 @@ def scan_code_string(
 
     if severity_filter:
         findings = [
-            f for f in findings
-            if _severity_passes_filter(f.severity, severity_filter)
+            f for f in findings if _severity_passes_filter(f.severity, severity_filter)
         ]
+
+    duration_seconds = time.time() - start_time
+    if return_format == "json":
+        return _findings_to_json_payload(
+            findings,
+            total_files=1,
+            duration_seconds=duration_seconds,
+        )
+    if return_format == "csv":
+        return _findings_to_csv(findings)
 
     return _format_findings(findings, return_format)
 
@@ -364,7 +430,7 @@ def scan_file(
     file_path: str,
     *,
     ruleset: str = "default",
-    return_format: Literal["dict", "sarif", "text"] = "dict",
+    return_format: Literal["dict", "sarif", "text", "json", "csv"] = "dict",
     severity_filter: Optional[List[str]] = None,
 ) -> Any:
     """Scan a single Python file for security vulnerabilities.
@@ -384,13 +450,23 @@ def scan_file(
     abs_path = os.path.abspath(file_path)
     rules_path = _resolve_rules_path(ruleset)
 
+    start_time = time.time()
     findings = _run_scan_on_files([abs_path], rules_path, workers=1)
 
     if severity_filter:
         findings = [
-            f for f in findings
-            if _severity_passes_filter(f.severity, severity_filter)
+            f for f in findings if _severity_passes_filter(f.severity, severity_filter)
         ]
+
+    duration_seconds = time.time() - start_time
+    if return_format == "json":
+        return _findings_to_json_payload(
+            findings,
+            total_files=1,
+            duration_seconds=duration_seconds,
+        )
+    if return_format == "csv":
+        return _findings_to_csv(findings)
 
     return _format_findings(findings, return_format)
 
@@ -399,7 +475,7 @@ def scan_directory(
     path: str,
     *,
     ruleset: str = "default",
-    return_format: Literal["dict", "sarif", "text"] = "dict",
+    return_format: Literal["dict", "sarif", "text", "json", "csv"] = "dict",
     severity_filter: Optional[List[str]] = None,
     workers: int = 0,
 ) -> Any:
@@ -425,14 +501,28 @@ def scan_directory(
                 py_files.append(os.path.join(root, fname))
 
     if not py_files:
+        if return_format == "json":
+            return _findings_to_json_payload([], total_files=0, duration_seconds=0.0)
+        if return_format == "csv":
+            return _findings_to_csv([])
         return _format_findings([], return_format)
 
+    start_time = time.time()
     findings = _run_scan_on_files(py_files, rules_path, workers=workers)
 
     if severity_filter:
         findings = [
-            f for f in findings
-            if _severity_passes_filter(f.severity, severity_filter)
+            f for f in findings if _severity_passes_filter(f.severity, severity_filter)
         ]
+
+    duration_seconds = time.time() - start_time
+    if return_format == "json":
+        return _findings_to_json_payload(
+            findings,
+            total_files=len(py_files),
+            duration_seconds=duration_seconds,
+        )
+    if return_format == "csv":
+        return _findings_to_csv(findings)
 
     return _format_findings(findings, return_format)
