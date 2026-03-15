@@ -1,0 +1,398 @@
+import os
+
+content = r'''
+"""Taint analysis engine for PyAegis.
+
+Fixes:
+- Tuple/starred unpacking taint propagation
+- Class instance attribute cross-method taint tracking
+- Variable reassignment sensitivity
+- Dict unpacking taint propagation
+- Conditional sink rules (has_kwarg, not_in_test_file)
+- P1: route-decorated function args auto-tainted
+"""
+from __future__ import annotations
+
+import ast
+import logging
+import os
+from typing import Any, Dict, List, Optional, Set
+
+from pyaegis.models import Finding
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Default catalogs
+# ---------------------------------------------------------------------------
+
+DEFAULT_SOURCES: List[str] = [
+    "request", "request.GET", "request.POST", "request.FILES",
+    "request.body", "request.data", "request.COOKIES", "request.META",
+    "request.args", "request.form", "request.json", "request.values",
+    "input", "sys.argv", "os.environ", "os.environ.get", "environ.get",
+]
+
+DEFAULT_SINKS: List[str] = [
+    "os.system", "os.popen", "subprocess.call", "subprocess.run",
+    "subprocess.Popen", "subprocess.check_output", "subprocess.check_call",
+    "eval", "exec", "compile", "cursor.execute", "execute",
+    "open", "os.path.join", "shutil.copy", "shutil.move",
+    "render", "render_template_string", "redirect", "HttpResponseRedirect",
+    "pickle.loads", "yaml.load", "marshal.loads",
+    "requests.get", "requests.post",
+]
+
+DEFAULT_SANITIZERS: List[str] = [
+    "escape", "bleach.clean", "html.escape", "markupsafe.escape",
+    "quote", "quote_plus", "urllib.parse.quote",
+    "sanitize", "clean", "validate", "int", "float",
+]
+
+# Route decorator suffixes that indicate HTTP handler functions
+_ROUTE_SUFFIXES = {
+    "route", "get", "post", "put", "delete", "patch",
+    "options", "head", "trace",
+}
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers (exported for tests)
+# ---------------------------------------------------------------------------
+
+def _is_test_filepath(filepath: str) -> bool:
+    """Return True if filepath looks like a test file."""
+    # Normalise separators
+    norm = filepath.replace("\\\\", "/").replace("\\", "/")
+    parts = norm.lower().split("/")
+    # Check directory components
+    for part in parts[:-1]:
+        if part in ("tests", "test", "testing", "testcase", "testcases"):
+            return True
+    # Check filename
+    fname = parts[-1] if parts else ""
+    if fname.startswith("test_") or fname.endswith("_test.py"):
+        return True
+    return False
+
+
+def _check_conditional_sink(
+    call: ast.Call,
+    sink_def: Dict[str, Any],
+    filepath: str,
+) -> bool:
+    """Evaluate all conditions for a conditional sink definition.
+
+    Returns True if ALL conditions are satisfied (sink should fire).
+    Returns False if any condition is NOT satisfied (sink suppressed).
+    If no conditions, returns True (unconditional).
+    """
+    conditions = sink_def.get("conditions", [])
+    if not conditions:
+        return True
+    for cond in conditions:
+        if "has_kwarg" in cond:
+            required = cond["has_kwarg"]
+            for kname, kval in required.items():
+                found = False
+                for kw in call.keywords:
+                    if kw.arg == kname:
+                        if isinstance(kw.value, ast.Constant) and kw.value.value == kval:
+                            found = True
+                        break
+                if not found:
+                    return False
+        if "not_in_test_file" in cond:
+            if cond["not_in_test_file"] and _is_test_filepath(filepath):
+                return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# AST helpers
+# ---------------------------------------------------------------------------
+
+def _node_name(node: ast.expr) -> Optional[str]:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _node_name(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
+    if isinstance(node, ast.Subscript):
+        return _node_name(node.value)
+    if isinstance(node, ast.Call):
+        return _node_name(node.func)
+    return None
+
+
+def _is_constant(node: ast.expr) -> bool:
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return all(_is_constant(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(
+            (k is None or _is_constant(k)) and _is_constant(v)
+            for k, v in zip(node.keys, node.values)
+        )
+    return False
+
+
+def _matches_sink(name: str, sinks: Set[str]) -> bool:
+    if name in sinks:
+        return True
+    for sink in sinks:
+        if sink.endswith(".*"):
+            prefix = sink[:-2]
+            if name == prefix or name.startswith(prefix + "."):
+                return True
+    return False
+
+
+def _is_route_decorator(dec_name: str) -> bool:
+    """Return True if decorator name looks like a web-framework route."""
+    suffix = dec_name.split(".")[-1].lower()
+    return suffix in _ROUTE_SUFFIXES
+
+
+# ---------------------------------------------------------------------------
+# Core TaintTracker
+# ---------------------------------------------------------------------------
+
+class TaintTracker:
+    """Single-pass taint analysis over Python AST function bodies.
+
+    Usage::
+
+        tracker = TaintTracker(
+            sources=[...],
+            sinks=[...],
+            sanitizers=[...],
+            conditional_sinks=[{"name": "subprocess.run", "conditions": [{"has_kwarg": {"shell": True}}]}],
+            source_decorators=["login_required"],
+        )
+        tracker.analyze_cfg(cfg, filepath=path)
+        findings = tracker.get_findings()
+    """
+
+    def __init__(
+        self,
+        sources: Optional[List[str]] = None,
+        sinks: Optional[List[str]] = None,
+        sanitizers: Optional[List[str]] = None,
+        conditional_sinks: Optional[List[Dict[str, Any]]] = None,
+        source_decorators: Optional[List[str]] = None,
+    ) -> None:
+        self._sources: Set[str] = set(sources) if sources is not None else set(DEFAULT_SOURCES)
+        self._sinks: Set[str] = set(sinks) if sinks is not None else set(DEFAULT_SINKS)
+        self._sanitizers: Set[str] = set(sanitizers) if sanitizers is not None else set(DEFAULT_SANITIZERS)
+        # conditional_sinks: list of {name, severity, rule_id, conditions:[...]}
+        self._conditional_sinks: List[Dict[str, Any]] = conditional_sinks or []
+        # extra decorator names that mark a function as a source entry point
+        self._source_decorators: Set[str] = set(source_decorators or [])
+
+        self._tainted: Set[str] = set()
+        self._instance_taint: Dict[str, Set[str]] = {}
+        self._findings: List[Finding] = []
+        self._filepath: str = "<unknown>"
+        self._in_branch: bool = False
+        self._current_class: Optional[str] = None
+
+    # --- Public API ---
+
+    def analyze_cfg(self, cfg: Dict[str, Any], filepath: str = "<unknown>") -> None:
+        """Analyze all functions in a CFG dict and accumulate findings."""
+        self._findings.clear()
+        self._filepath = filepath
+        self._instance_taint.clear()
+
+        for func_name, func_data in cfg.items():
+            self._tainted = set()
+            self._in_branch = False
+            body = self._get_body(func_data)
+            if body is None:
+                continue
+
+            # P1: auto-taint args of route-decorated functions
+            if isinstance(func_data, dict):
+                decorators = func_data.get("decorators", [])
+                args = func_data.get("args", [])
+                is_route = any(_is_route_decorator(d) for d in decorators)
+                is_source_dec = bool(self._source_decorators and
+                                     any(d in self._source_decorators for d in decorators))
+                if is_route or is_source_dec:
+                    # All parameters (except self/cls) are tainted
+                    for arg in args:
+                        if arg not in ("self", "cls"):
+                            self._tainted.add(arg)
+
+            self._walk(body, func_name)
+
+    def get_findings(self) -> List[Finding]:
+        return list(self._findings)
+
+    # --- Helpers ---
+
+    @staticmethod
+    def _get_body(func_data: Any) -> Optional[List[ast.stmt]]:
+        if isinstance(func_data, dict):
+            return func_data.get("body")
+        if isinstance(func_data, list):
+            return func_data
+        return None
+
+    def _cls_key(self) -> str:
+        return self._current_class or "__self__"
+
+    def _is_attr_tainted(self, attr: str) -> bool:
+        return attr in self._instance_taint.get(self._cls_key(), set())
+
+    def _mark_attr_tainted(self, attr: str) -> None:
+        self._instance_taint.setdefault(self._cls_key(), set()).add(attr)
+
+    def _clear_attr_taint(self, attr: str) -> None:
+        self._instance_taint.get(self._cls_key(), set()).discard(attr)
+
+    # --- Taint evaluator ---
+
+    def _is_tainted(self, node: ast.expr) -> bool:  # noqa: C901
+        if node is None or _is_constant(node):
+            return False
+        if isinstance(node, ast.Name):
+            return node.id in self._tainted
+        if isinstance(node, ast.Attribute):
+            full = _node_name(node)
+            if full and full in self._sources:
+                return True
+            base = _node_name(node.value)
+            if base and base in self._sources:
+                return True
+            if base == "self":
+                return self._is_attr_tainted(node.attr)
+            if base and base in self._tainted:
+                return True
+            if full and full in self._tainted:
+                return True
+            return False
+        if isinstance(node, ast.Subscript):
+            return self._is_tainted(node.value)
+        if isinstance(node, ast.Call):
+            call_name = _node_name(node.func)
+            if call_name and call_name in self._sanitizers:
+                return False
+            if call_name and call_name in self._sources:
+                return True
+            return (any(self._is_tainted(a) for a in node.args) or
+                    any(self._is_tainted(kw.value) for kw in node.keywords))
+        if isinstance(node, ast.BinOp):
+            return self._is_tainted(node.left) or self._is_tainted(node.right)
+        if isinstance(node, ast.JoinedStr):
+            return any(
+                self._is_tainted(v.value)
+                for v in node.values
+                if isinstance(v, ast.FormattedValue)
+            )
+        if isinstance(node, ast.IfExp):
+            return self._is_tainted(node.body) or self._is_tainted(node.orelse)
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return any(self._is_tainted(e) for e in node.elts)
+        if isinstance(node, ast.Dict):
+            return any(self._is_tainted(v) for v in node.values)
+        if isinstance(node, ast.Starred):
+            return self._is_tainted(node.value)
+        if isinstance(node, ast.UnaryOp):
+            return self._is_tainted(node.operand)
+        if isinstance(node, ast.BoolOp):
+            return any(self._is_tainted(v) for v in node.values)
+        return False
+
+    # --- Statement walker ---
+
+    def _walk(self, stmts: List[ast.stmt], func_name: str) -> None:
+        for stmt in stmts:
+            self._visit(stmt, func_name)
+
+    def _visit(self, stmt: ast.stmt, func_name: str) -> None:  # noqa: C901
+        if isinstance(stmt, ast.ClassDef):
+            prev = self._current_class
+            self._current_class = stmt.name
+            self._walk(stmt.body, func_name)
+            self._current_class = prev
+            return
+
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            outer = set(self._tainted)
+            self._walk(stmt.body, stmt.name)
+            self._tainted = outer
+            return
+
+        if isinstance(stmt, ast.Assign):
+            rhs_tainted = self._is_tainted(stmt.value)
+            for target in stmt.targets:
+                self._do_assign(target, rhs_tainted, func_name, stmt.lineno)
+            return
+
+        if isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            rhs_tainted = self._is_tainted(stmt.value)
+            self._do_assign(stmt.target, rhs_tainted, func_name, stmt.lineno)
+            return
+
+        if isinstance(stmt, ast.AugAssign):
+            if self._is_tainted(stmt.value):
+                name = _node_name(stmt.target)
+                if name:
+                    self._tainted.add(name)
+            return
+
+        if isinstance(stmt, ast.Expr):
+            if isinstance(stmt.value, ast.Call):
+                self._check_sink(stmt.value, func_name)
+            return
+
+        if isinstance(stmt, ast.If):
+            prev_branch = self._in_branch
+            self._in_branch = True
+            pre = set(self._tainted)
+            self._walk(stmt.body, func_name)
+            after_body = set(self._tainted)
+            self._tainted = set(pre)
+            self._walk(stmt.orelse, func_name)
+            after_else = set(self._tainted)
+            self._tainted = after_body | after_else
+            self._in_branch = prev_branch
+            return
+
+        if isinstance(stmt, (ast.For, ast.While)):
+            self._walk(stmt.body, func_name)
+            if stmt.orelse:
+                self._walk(stmt.orelse, func_name)
+            return
+
+        if isinstance(stmt, ast.Try):
+            self._walk(stmt.body, func_name)
+            for h in stmt.handlers:
+                self._walk(h.body, func_name)
+            if stmt.orelse:
+                self._walk(stmt.orelse, func_name)
+            if stmt.finalbody:
+                self._walk(stmt.finalbody, func_name)
+            return
+
+        if isinstance(stmt, ast.With):
+            self._walk(stmt.body, func_name)
+            return
+
+    # --- Assignment target dispatch ---
+
+    def _do_assign(
+        self, target: ast.expr, rhs_tainted: bool, func_name: str, lineno: int
+    ) -> None:
+        if isinstance(target, ast.Name):
+            if rhs_tainted:
+                self._tainted.add(target.id)
+            elif not self._in_branch:
+                self._tainted.discard(target.id)
+            return
+        if isinstance(target, ast.Attribute):
+            base =

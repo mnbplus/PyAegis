@@ -22,7 +22,13 @@ from pyaegis.core.parser import ParallelProjectParser
 from pyaegis.core.taint import TaintTracker
 from pyaegis.exceptions import ParserError
 from pyaegis.models import ScanResult
-from pyaegis.reporters import JSONReporter, SARIFReporter, TextReporter
+from pyaegis.reporters import (
+    CSVReporter,
+    HTMLReporter,
+    JSONReporter,
+    SARIFReporter,
+    TextReporter,
+)
 from pyaegis.rules_catalog import RULES, format_explain
 
 
@@ -345,6 +351,8 @@ def _scan(args: argparse.Namespace) -> int:
         sources=rules.get("inputs", []),
         sinks=rules.get("sinks", []),
         sanitizers=rules.get("sanitizers", []),
+        conditional_sinks=rules.get("conditional_sinks", []),
+        source_decorators=rules.get("source_decorators", []),
     )
 
     for filepath, cfg in cfgs.items():

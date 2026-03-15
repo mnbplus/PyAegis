@@ -1,17 +1,164 @@
 # PyAegis default rule set
 #
-# This file is intentionally "flat" (lists of patterns) so the engine can stay
-# lightweight. It supports exact match and glob patterns (fnmatch), e.g.
-#   - subprocess.*
-#   - xml.etree.ElementTree.*
+# This file is intentionally structured to support both:
+#   - Simple flat lists (inputs/sinks/sanitizers) for basic matching
+#   - Structured conditional_sinks for reduced false positives (P2)
+#   - source_decorators for framework-aware taint entry-points (P1)
 #
-# Terminology:
-# - inputs: untrusted sources
-# - sinks: dangerous call targets
-# - sanitizers: known cleaning/encoding functions (stop taint)
+# Glob patterns (fnmatch) supported in inputs/sinks, e.g. subprocess.*
 #
-# NOTE: These are heuristic rules for SAST, not a guarantee of safety.
+# conditional_sinks: structured sink definitions with optional conditions.
+#   conditions.has_kwarg  : only trigger when call has a specific kwarg=value
+#   conditions.not_in_test_file: skip if file path looks like a test file
 
+# ── Unconditional sinks (keep for backward compat + glob matching) ──────────
+sinks:
+  # Code execution
+  - eval
+  - exec
+  - compile
+  - builtins.eval
+  - builtins.exec
+  - runpy.run_module
+  - runpy.run_path
+
+  # OS command execution (conditional versions below override these)
+  - os.system
+  - os.popen
+  - os.spawn*
+  - commands.getoutput
+
+  # Template injection / dangerous rendering
+  - jinja2.Template
+  - jinja2.Environment.from_string
+  - mako.template.Template
+
+  # Deserialization (conditional versions below handle test-file skip)
+  - cPickle.loads
+  - dill.loads
+  - marshal.loads
+  - yaml.load
+  - yaml.unsafe_load
+  - ruamel.yaml.load
+  - jsonpickle.decode
+
+  # SSRF / URL fetch
+  - urllib.request.urlopen
+  - urllib3.PoolManager.request
+  - urllib3.request
+  - requests.get
+  - requests.post
+  - requests.request
+  - httpx.get
+  - httpx.post
+  - httpx.request
+  - aiohttp.ClientSession.get
+  - aiohttp.ClientSession.post
+  - aiohttp.ClientSession.request
+  - socket.create_connection
+
+  # Path traversal / file ops
+  - open
+  - builtins.open
+  - os.open
+  - os.remove
+  - os.unlink
+  - os.rmdir
+  - os.rename
+  - os.replace
+  - os.mkdir
+  - os.makedirs
+  - shutil.copy
+  - shutil.copyfile
+  - shutil.copytree
+  - shutil.move
+  - shutil.rmtree
+  - pathlib.Path
+  - pathlib.Path.open
+  - pathlib.Path.write_text
+  - pathlib.Path.write_bytes
+  - tempfile.NamedTemporaryFile
+
+  # SQL injection
+  - sqlite3.connect
+  - sqlite3.Connection.execute
+  - sqlite3.Cursor.execute
+  - sqlite3.Cursor.executemany
+  - psycopg2.connect
+  - psycopg2.cursor.execute
+  - MySQLdb.connect
+  - pymysql.connect
+  - sqlalchemy.text
+
+  # XXE / XML
+  - xml.etree.ElementTree.parse
+  - xml.etree.ElementTree.fromstring
+  - lxml.etree.parse
+  - lxml.etree.fromstring
+  - xml.dom.minidom.parse
+  - xml.dom.minidom.parseString
+
+  # Regex DoS
+  - re.compile
+  - re.match
+  - re.search
+
+# ── Conditional sinks (P2: reduce false positives) ──────────────────────────
+# These sinks are ONLY reported when their conditions are satisfied.
+# A conditional sink listed here SHADOWS the matching unconditional entry above.
+conditional_sinks:
+  # subprocess.run(cmd, shell=False) is SAFE — only flag shell=True
+  - name: subprocess.run
+    severity: CRITICAL
+    rule_id: PYA-001
+    vuln_type: command_injection
+    conditions:
+      - has_kwarg:
+          shell: true
+
+  # subprocess.call with shell=True only
+  - name: subprocess.call
+    severity: CRITICAL
+    rule_id: PYA-001
+    vuln_type: command_injection
+    conditions:
+      - has_kwarg:
+          shell: true
+
+  # subprocess.Popen with shell=True only
+  - name: subprocess.Popen
+    severity: CRITICAL
+    rule_id: PYA-001
+    vuln_type: command_injection
+    conditions:
+      - has_kwarg:
+          shell: true
+
+  # subprocess.* glob — shell=True only
+  - name: subprocess.*
+    severity: CRITICAL
+    rule_id: PYA-001
+    vuln_type: command_injection
+    conditions:
+      - has_kwarg:
+          shell: true
+
+  # pickle.loads / pickle.load: ignore in test files
+  - name: pickle.loads
+    severity: HIGH
+    rule_id: PYA-004
+    vuln_type: deserialization
+    conditions:
+      - not_in_test_file: true
+
+  - name: pickle.load
+    severity: HIGH
+    rule_id: PYA-004
+    vuln_type: deserialization
+    conditions:
+      - not_in_test_file: true
+
+# ── Inputs (untrusted sources) ───────────────────────────────────────────────
 inputs:
   # Builtins / env / cli
   - input
@@ -69,103 +216,37 @@ inputs:
   # XML from user-controlled strings
   - xmltodict.parse
 
-sinks:
-  # Code execution
-  - eval
-  - exec
-  - compile
-  - builtins.eval
-  - builtins.exec
-  - runpy.run_module
-  - runpy.run_path
+# ── Source decorators (P1: framework-aware source detection) ─────────────────
+# Functions decorated with these are treated as taint entry-points.
+# All their parameters are automatically marked as tainted Sources (depth=1).
+source_decorators:
+  # Flask
+  - app.route
+  - app.get
+  - app.post
+  - app.put
+  - app.delete
+  - app.patch
+  - app.options
+  - app.head
+  # FastAPI / APIRouter
+  - router.get
+  - router.post
+  - router.put
+  - router.delete
+  - router.patch
+  - router.options
+  - router.head
+  - router.route
+  # Generic web framework patterns
+  - bp.route
+  - bp.get
+  - bp.post
+  - bp.put
+  - bp.delete
+  - bp.patch
 
-  # OS command execution
-  - os.system
-  - os.popen
-  - os.spawn*
-  - subprocess.call
-  - subprocess.run
-  - subprocess.Popen
-  - subprocess.*
-  - commands.getoutput
-
-  # Template injection / dangerous rendering
-  - jinja2.Template
-  - jinja2.Environment.from_string
-  - mako.template.Template
-
-  # Deserialization
-  - pickle.loads
-  - pickle.load
-  - cPickle.loads
-  - dill.loads
-  - marshal.loads
-  - yaml.load
-  - yaml.unsafe_load
-  - ruamel.yaml.load
-  - jsonpickle.decode
-
-  # SSRF / URL fetch
-  - urllib.request.urlopen
-  - urllib3.PoolManager.request
-  - urllib3.request
-  - requests.get
-  - requests.post
-  - requests.request
-  - httpx.get
-  - httpx.post
-  - httpx.request
-  - aiohttp.ClientSession.get
-  - aiohttp.ClientSession.post
-  - aiohttp.ClientSession.request
-  - socket.create_connection
-
-  # Path traversal / file ops
-  - open
-  - builtins.open
-  - os.open
-  - os.remove
-  - os.unlink
-  - os.rmdir
-  - os.rename
-  - os.replace
-  - os.mkdir
-  - os.makedirs
-  - shutil.copy
-  - shutil.copyfile
-  - shutil.copytree
-  - shutil.move
-  - shutil.rmtree
-  - pathlib.Path
-  - pathlib.Path.open
-  - pathlib.Path.write_text
-  - pathlib.Path.write_bytes
-  - tempfile.NamedTemporaryFile
-
-  # SQL injection (common entrypoints)
-  - sqlite3.connect
-  - sqlite3.Connection.execute
-  - sqlite3.Cursor.execute
-  - sqlite3.Cursor.executemany
-  - psycopg2.connect
-  - psycopg2.cursor.execute
-  - MySQLdb.connect
-  - pymysql.connect
-  - sqlalchemy.text
-
-  # XXE / XML parsing with entities
-  - xml.etree.ElementTree.parse
-  - xml.etree.ElementTree.fromstring
-  - lxml.etree.parse
-  - lxml.etree.fromstring
-  - xml.dom.minidom.parse
-  - xml.dom.minidom.parseString
-
-  # Regex DoS-ish sinks
-  - re.compile
-  - re.match
-  - re.search
-
+# ── Sanitizers ───────────────────────────────────────────────────────────────
 sanitizers:
   # HTML / XSS
   - html.escape

@@ -76,6 +76,66 @@ def _rule_id_for_sink(sink_name: str) -> str:
     return "PYA-999"
 
 
+def _is_test_filepath(filepath: str) -> bool:
+    """Return True if the filepath looks like a test file."""
+    import re
+    # Normalize separators
+    normalized = filepath.replace("\\", "/")
+    # Check directory components
+    parts = normalized.split("/")
+    for part in parts[:-1]:  # directory parts
+        if part in ("tests", "testing", "test"):
+            return True
+    # Check filename
+    filename = parts[-1]
+    if filename.startswith("test_") or filename.endswith("_test.py"):
+        return True
+    return False
+
+
+def _check_conditional_sink(
+    sink_name: str,
+    call_node: ast.Call,
+    conditional_sinks: List[Dict[str, Any]],
+    filepath: str,
+) -> Optional[Dict[str, Any]]:
+    """Check whether a conditional sink entry matches and its conditions are satisfied.
+
+    Returns the matching conditional sink dict if all conditions pass, else None.
+    """
+    for cs in conditional_sinks:
+        cs_name = cs.get("name", "")
+        # Match by exact name or glob
+        if cs_name != sink_name and not (
+            any(ch in cs_name for ch in "*?[]") and fnmatch.fnmatch(sink_name, cs_name)
+        ):
+            continue
+        # All conditions must pass
+        conditions = cs.get("conditions", [])
+        all_pass = True
+        for cond in conditions:
+            if "has_kwarg" in cond:
+                for kw_name, kw_val in cond["has_kwarg"].items():
+                    found = False
+                    for kw in call_node.keywords:
+                        if kw.arg == kw_name:
+                            # Check value matches
+                            if isinstance(kw.value, ast.Constant) and kw.value.value == kw_val:
+                                found = True
+                            break
+                    if not found:
+                        all_pass = False
+                        break
+            if "not_in_test_file" in cond:
+                if cond["not_in_test_file"] and _is_test_filepath(filepath):
+                    all_pass = False
+            if not all_pass:
+                break
+        if all_pass:
+            return cs
+    return None
+
+
 
 @dataclass(frozen=True)
 class _FnContext:
@@ -93,6 +153,8 @@ class TaintTracker:
     - Inter-procedural propagation (cross-function calls) within a parsed file.
     - String operations propagation: concatenation and f-string tainting.
     - Sanitizer detection: variables assigned from sanitizers are treated clean.
+    - Tuple/starred unpacking: taint propagates to all unpacked targets.
+    - Class instance attribute tracking: self.attr taint across methods.
 
     Notes:
     This is still a lightweight AST taint engine (best-effort), not a full dataflow
@@ -104,23 +166,34 @@ class TaintTracker:
         sources: List[str],
         sinks: List[str],
         sanitizers: Optional[List[str]] = None,
+        conditional_sinks: Optional[List[Dict[str, Any]]] = None,
+        source_decorators: Optional[List[str]] = None,
     ):
-        """Create a tracker.
-
+        """
         Args:
             sources: Root objects / function names considered untrusted, and/or
                      attribute patterns (e.g. request.args, request.GET, input).
             sinks: Sensitive call targets. Supports glob patterns (e.g. subprocess.*).
             sanitizers: Calls that sanitize input (e.g. html.escape, bleach.clean).
+            conditional_sinks: List of conditional sink definitions. Each entry is a dict
+                with keys: name, severity, rule_id, conditions.
+            source_decorators: List of decorator patterns that mark a function's args
+                as tainted (e.g. route decorators like 'app.route', 'app.get').
         """
         self.sources: Set[str] = set(sources)
         self.sinks: Set[str] = set(sinks)
         self.sanitizers: Set[str] = set(sanitizers or [])
+        self.conditional_sinks: List[Dict[str, Any]] = conditional_sinks or []
+        self.source_decorators: List[str] = source_decorators or []
         self.vulnerabilities: List[Finding] = []
 
         # Cache for inter-procedural return taint computation:
         # key: (func_name, frozenset(tainted_param_names)) -> bool(return_tainted)
         self._return_taint_cache: Dict[Tuple[str, frozenset], bool] = {}
+
+        # Instance attribute taint tracking:
+        # key: instance_name (e.g. 'self'), value: set of tainted attribute names
+        self._instance_taints: Dict[str, Set[str]] = {}
 
     def analyze_cfg(self, cfg: Dict[str, Any], filepath: str):
         """Perform taint tracking for a single file's extracted CFG.
@@ -141,6 +214,9 @@ class TaintTracker:
                     args=meta.get("args", []) or [],
                 )
 
+        # Reset instance taints for this CFG analysis
+        self._instance_taints = {}
+
         for fn_name, fnctx in fnmap.items():
             # Seed taint: if the function has a parameter named like a source root
             # (e.g. request), consider it tainted.
@@ -148,6 +224,13 @@ class TaintTracker:
             for arg in fnctx.args:
                 if arg in self.sources:
                     tainted_vars.add(arg)
+
+            # Framework-aware: if function is decorated with a route decorator,
+            # all its args are considered tainted (they come from HTTP requests).
+            if self._fn_has_route_decorator(fnctx, cfg.get(fn_name, {})):
+                for arg in fnctx.args:
+                    if arg != "self":
+                        tainted_vars.add(arg)
 
             self._analyze_function(
                 fnctx=fnctx,
@@ -157,6 +240,30 @@ class TaintTracker:
                 tainted_params=set(),
                 callstack=[fn_name],
             )
+
+    def _fn_has_route_decorator(self, fnctx: _FnContext, meta: Any) -> bool:
+        """Return True if the function has a web route decorator."""
+        # Built-in route decorator patterns to always check
+        _ROUTE_PATTERNS = [
+            "*.route", "*.get", "*.post", "*.put", "*.delete",
+            "*.patch", "*.head", "*.options",
+        ]
+        routes = []
+        if isinstance(meta, dict):
+            routes = meta.get("routes", []) or []
+        if routes:
+            return True
+        # Also check source_decorators passed by user
+        decorators = []
+        if isinstance(meta, dict):
+            decorators = meta.get("decorators", []) or []
+        all_patterns = _ROUTE_PATTERNS + self.source_decorators
+        for dec in decorators:
+            dec_str = str(dec)
+            for pat in all_patterns:
+                if fnmatch.fnmatch(dec_str, pat) or dec_str == pat:
+                    return True
+        return False
 
     def _matches_any(self, name: str, patterns: Set[str]) -> bool:
         for p in patterns:
@@ -260,9 +367,15 @@ class TaintTracker:
                 if k is not None and v is not None
             )
 
-        # Attribute / subscript: treat as tainted if base is tainted
+        # Instance attribute read: self.attr - check _instance_taints
         if isinstance(expr, ast.Attribute):
             base = expr.value
+            # Check instance attribute taint tracking (e.g. self.data)
+            if isinstance(base, ast.Name):
+                inst_name = base.id
+                attr_name = expr.attr
+                if inst_name in self._instance_taints and attr_name in self._instance_taints[inst_name]:
+                    return True
             return self._is_tainted_expr(
                 base, tainted_vars, fnmap, callstack, tainted_params
             )
@@ -329,6 +442,47 @@ class TaintTracker:
 
         return False
 
+    def _taint_unpack_target(
+        self,
+        target: ast.AST,
+        tainted_vars: Set[str],
+        is_tainted: bool,
+        is_clean: bool,
+    ) -> None:
+        """Recursively taint or clean all names in an unpack target (Tuple/List/Starred)."""
+        if isinstance(target, ast.Name):
+            if is_clean:
+                tainted_vars.discard(target.id)
+            elif is_tainted:
+                tainted_vars.add(target.id)
+        elif isinstance(target, ast.Starred):
+            # *rest — taint the inner name
+            self._taint_unpack_target(target.value, tainted_vars, is_tainted, is_clean)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                self._taint_unpack_target(elt, tainted_vars, is_tainted, is_clean)
+
+    def _record_instance_attr_taint(
+        self,
+        target: ast.AST,
+        is_tainted: bool,
+        is_clean: bool,
+    ) -> None:
+        """If target is `self.attr` (or any instance.attr), update _instance_taints."""
+        if not isinstance(target, ast.Attribute):
+            return
+        if not isinstance(target.value, ast.Name):
+            return
+        inst_name = target.value.id
+        attr_name = target.attr
+        if is_clean:
+            if inst_name in self._instance_taints:
+                self._instance_taints[inst_name].discard(attr_name)
+        elif is_tainted:
+            if inst_name not in self._instance_taints:
+                self._instance_taints[inst_name] = set()
+            self._instance_taints[inst_name].add(attr_name)
+
     def _analyze_function(
         self,
         fnctx: _FnContext,
@@ -355,6 +509,12 @@ class TaintTracker:
                             tainted_vars.discard(target.id)
                         elif is_tainted:
                             tainted_vars.add(target.id)
+                    elif isinstance(target, (ast.Tuple, ast.List)):
+                        # Tuple/list unpacking: a, b = ...
+                        self._taint_unpack_target(target, tainted_vars, is_tainted, is_clean)
+                    elif isinstance(target, ast.Attribute):
+                        # Instance attribute assignment: self.data = ...
+                        self._record_instance_attr_taint(target, is_tainted, is_clean)
 
             # AnnAssign
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
@@ -382,22 +542,45 @@ class TaintTracker:
                     if self._call_has_tainted_arg(
                         node, tainted_vars, fnmap, callstack, tainted_params
                     ):
-                        rule_id = _rule_id_for_sink(sink_name)
-                        sev = "CRITICAL"
-                        r = get_rule(rule_id)
-                        if r is not None:
-                            sev = r.severity
-                        self.vulnerabilities.append(
-                            Finding(
-                                rule_id=rule_id,
-                                description=f"Tainted data reaches sink: {sink_name}",
-                                file_path=filepath,
-                                line_number=getattr(node, "lineno", 0),
-                                sink_context=fnctx.name,
-                                severity=sev,
-                                sink_name=sink_name,
+                        # Check conditional sinks first
+                        cs_match = _check_conditional_sink(
+                            sink_name, node, self.conditional_sinks, filepath
+                        ) if self.conditional_sinks else None
+
+                        # If there are conditional sink entries for this sink name,
+                        # only report if conditions are satisfied
+                        has_cond_entry = any(
+                            cs.get("name", "") == sink_name or (
+                                any(ch in cs.get("name", "") for ch in "*?[]")
+                                and fnmatch.fnmatch(sink_name, cs.get("name", ""))
                             )
+                            for cs in self.conditional_sinks
                         )
+
+                        if has_cond_entry and cs_match is None:
+                            # Conditions not met — suppress
+                            pass
+                        else:
+                            rule_id = _rule_id_for_sink(sink_name)
+                            sev = "CRITICAL"
+                            if cs_match:
+                                rule_id = cs_match.get("rule_id", rule_id)
+                                sev = cs_match.get("severity", sev)
+                            else:
+                                r = get_rule(rule_id)
+                                if r is not None:
+                                    sev = r.severity
+                            self.vulnerabilities.append(
+                                Finding(
+                                    rule_id=rule_id,
+                                    description=f"Tainted data reaches sink: {sink_name}",
+                                    file_path=filepath,
+                                    line_number=getattr(node, "lineno", 0),
+                                    sink_context=fnctx.name,
+                                    severity=sev,
+                                    sink_name=sink_name,
+                                )
+                            )
 
     def _call_has_tainted_arg(
         self,
@@ -456,6 +639,8 @@ class TaintTracker:
                     for t in node.targets:
                         if isinstance(t, ast.Name):
                             local_tainted.add(t.id)
+                        elif isinstance(t, (ast.Tuple, ast.List)):
+                            self._taint_unpack_target(t, local_tainted, True, False)
             elif isinstance(node, ast.Return):
                 if node.value is not None and self._is_tainted_expr(
                     node.value, local_tainted, fnmap, callstack + [fn], tainted_params

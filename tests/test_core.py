@@ -299,3 +299,55 @@ def test_ssrf_requests_get(tmp_path):
     tracker = TaintTracker(sources=["request", "request.args"], sinks=["requests.get"])
     tracker.analyze_cfg(cfg, filepath=str(p))
     assert len(tracker.get_findings()) == 1
+
+
+def test_taint_tuple_unpacking(tmp_path):
+    """Taint should propagate to all variables in a tuple unpacking assignment."""
+    p = _write_tmp(
+        tmp_path,
+        "unpack.py",
+        """
+    import os
+
+    def get_user_input():
+        return 'a', 'b'
+
+    def f(request):
+        a, b = request.args.get('x'), request.args.get('y')
+        os.system(b)
+    """,
+    )
+
+    parser = PyASTParser(str(p))
+    parser.parse()
+    cfg = parser.extract_cfg()
+
+    tracker = TaintTracker(sources=["request", "request.args"], sinks=["os.system"])
+    tracker.analyze_cfg(cfg, filepath=str(p))
+    assert len(tracker.get_findings()) >= 1
+
+
+def test_taint_instance_attribute_cross_method(tmp_path):
+    """Taint set on self.attr in one method must be detected at sink in another method."""
+    p = _write_tmp(
+        tmp_path,
+        "instance_attr.py",
+        """
+    import os
+
+    class Handler:
+        def setup(self, request):
+            self.data = request.GET.get('q')
+
+        def process(self):
+            os.system(self.data)
+    """,
+    )
+
+    parser = PyASTParser(str(p))
+    parser.parse()
+    cfg = parser.extract_cfg()
+
+    tracker = TaintTracker(sources=["request", "request.GET"], sinks=["os.system"])
+    tracker.analyze_cfg(cfg, filepath=str(p))
+    assert len(tracker.get_findings()) >= 1
