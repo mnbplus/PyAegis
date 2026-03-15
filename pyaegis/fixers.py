@@ -271,6 +271,13 @@ class RemediationEngine:
             print(patch)
     """
 
+    def get_hint(self, finding: Finding) -> str:
+        """Return a concise one-line fix hint for *finding*.
+
+        Convenience wrapper used by reporters and the ``remediate`` CLI command.
+        """
+        return self.get_remediation(finding).summary()
+
     def get_remediation(self, finding: Finding) -> Remediation:
         """Return the best matching Remediation for *finding*.
 

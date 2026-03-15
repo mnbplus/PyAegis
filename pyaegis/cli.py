@@ -68,6 +68,28 @@ def _default_rules_path() -> str:
     return str(Path(__file__).resolve().parent / "rules" / "default.yml")
 
 
+def _rules_dir() -> Path:
+    return Path(__file__).resolve().parent / "rules"
+
+
+def _available_rulesets() -> dict[str, str]:
+    rules_dir = _rules_dir()
+    out: dict[str, str] = {}
+    for path in list(rules_dir.glob("*.yml")) + list(rules_dir.glob("*.yaml")):
+        out[path.stem.lower()] = str(path)
+    return out
+
+
+def _resolve_ruleset(name: str) -> Optional[str]:
+    if not name:
+        return None
+    rulesets = _available_rulesets()
+    key = name.strip().lower()
+    if key.endswith(".yml") or key.endswith(".yaml"):
+        key = Path(key).stem.lower()
+    return rulesets.get(key)
+
+
 def _load_yaml(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
@@ -136,6 +158,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "  pyaegis scan src --severity HIGH,CRITICAL\n"
         "  pyaegis fix app.py --dry-run\n"
         "  pyaegis fix app.py --apply\n"
+        "  pyaegis remediate src/\n"
         "  pyaegis explain PYA-001\n"
         "  pyaegis list-rules\n"
         "  pyaegis init\n"
@@ -170,10 +193,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to rules YAML file (defaults to bundled default rules).",
     )
     p_scan.add_argument(
-        "--format",
-        choices=["text", "json", "sarif", "csv", "html"],
+        "--ruleset",
         default=None,
-        help="Output format.",
+        help="Shortcut to a bundled ruleset name (e.g. xxe, ssrf, deserialization).",
     )
     p_scan.add_argument("--output", default=None, help="Output file path.")
     p_scan.add_argument(
@@ -224,6 +246,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- version ---
     sub.add_parser("version", help="Show version")
+
+    # --- remediate ---
+    p_remediate = sub.add_parser(
+        "remediate",
+        help="Scan a path and print inline fix hints for every finding",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_remediate.add_argument("target", help="File or directory to scan")
+    p_remediate.add_argument(
+        "--rules",
+        default=None,
+        help="Path to rules YAML file (defaults to bundled default rules).",
+    )
+    p_remediate.add_argument(
+        "--severity",
+        default=None,
+        help="Comma-separated severity allowlist, e.g. HIGH,CRITICAL",
+    )
+    p_remediate.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable coloured output.",
+    )
 
     # --- fix ---
     p_fix = sub.add_parser(
@@ -479,6 +524,60 @@ def _apply_patch_to_source(
     return "".join(new_lines)
 
 
+def _cmd_remediate(args: argparse.Namespace) -> int:
+    """Scan a path and print concise inline fix hints for every finding."""
+    target = args.target
+    if not os.path.exists(target):
+        sys.stderr.write(f"remediate: '{target}' does not exist.\n")
+        return 1
+
+    use_color = not getattr(args, "no_color", False)
+    rules_path = getattr(args, "rules", None) or _default_rules_path()
+
+    try:
+        _, findings = _run_taint_scan(target, rules_path, workers=1, show_progress=False)
+    except ParserError as e:
+        sys.stderr.write(f"remediate: parse error: {e}\n")
+        return 1
+
+    sev_allow: Optional[set] = None
+    if getattr(args, "severity", None):
+        try:
+            sev_allow = _parse_severity_csv(args.severity)
+        except ValueError as e:
+            sys.stderr.write(str(e) + "\n")
+            return 2
+    if sev_allow is not None:
+        findings = [f for f in findings if (f.severity or "").upper() in sev_allow]
+
+    if not findings:
+        sys.stdout.write(f"No vulnerabilities found in {target}.\n")
+        return 0
+
+    engine = RemediationEngine()
+    w = sys.stdout.write
+    w("=" * 64 + "\n")
+    w(f"  PyAegis Remediate — {target}\n")
+    w("=" * 64 + "\n")
+    w(f"  {len(findings)} finding(s) — inline fix hints below\n\n")
+
+    for f in findings:
+        sev_label = _colorize_severity(f.severity, use_color)
+        rem = engine.get_remediation(f)
+        hint = engine.get_hint(f)
+        w(f"[{sev_label}] {f.rule_id}  {f.file_path}:{f.line_number}\n")
+        w(f"  Context : {f.sink_context}\n")
+        w(f"  💡 {hint}\n")
+        w("  Example (after):\n")
+        for ln in rem.example_after.splitlines():
+            w(f"    {ln}\n")
+        w("\n")
+
+    w("-" * 64 + "\n")
+    w(f"Total: {len(findings)} finding(s). Run `pyaegis fix <file>` for patch generation.\n")
+    return 1  # findings exist
+
+
 def _cmd_fix(args: argparse.Namespace) -> int:
     """Scan a single file and display / apply AI remediation suggestions."""
     target = args.target
@@ -601,7 +700,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     # Backwards-compatibility: pyaegis <path> -> pyaegis scan <path>
-    known_cmds = {"scan", "explain", "list-rules", "init", "version", "fix"}
+    known_cmds = {"scan", "explain", "list-rules", "init", "version", "fix", "remediate"}
     if argv and not argv[0].startswith("-") and argv[0] not in known_cmds:
         argv = ["scan", *argv]
 
@@ -626,6 +725,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _scan(args)
     if cmd == "fix":
         return _cmd_fix(args)
+    if cmd == "remediate":
+        return _cmd_remediate(args)
 
     parser.print_help(sys.stdout)
     return 2
