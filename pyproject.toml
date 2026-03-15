@@ -26,6 +26,9 @@ dependencies = [
 ai = [
     "openai>=1.0.0",
 ]
+mcp = [
+    "mcp>=1.0.0",
+]
 dev = [
     "openai>=1.0.0",
     "pytest>=7.4.0",
