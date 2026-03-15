@@ -55,6 +55,12 @@ jobs:
             --rules pyaegis/rules/default.yml \
             --format text || true
 
+      - name: Debug SARIF content
+        if: always()
+        run: |
+          ls -la dogfood.sarif || echo "FILE NOT FOUND"
+          python3 -c "import json; d=json.load(open('dogfood.sarif')); r=d['runs'][0]['results']; print('results:', len(r)); [print('uri:', x['locations'][0]['physicalLocation']['artifactLocation']['uri'], 'base:', x['locations'][0]['physicalLocation']['artifactLocation'].get('uriBaseId')) for x in r[:3]]" || true
+
       - name: Upload SARIF to GitHub Code Scanning
         if: always()
         uses: github/codeql-action/upload-sarif@v3
