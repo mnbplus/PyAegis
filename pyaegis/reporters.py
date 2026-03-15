@@ -667,7 +667,30 @@ class SARIFReporter:
 
     @staticmethod
     def _build_result(finding: Finding, meta: Dict[str, str]) -> Dict[str, Any]:
-        uri = finding.file_path.replace("\\", "/")
+        # Normalise to a relative URI so GitHub Code Scanning accepts the SARIF.
+        # Absolute paths (CI runners, Windows) are stripped to be relative to
+        # the repo root by removing any prefix up to and including the last
+        # occurrence of common repo-root markers.
+        import re as _re
+
+        raw_path = finding.file_path.replace("\\", "/")
+        # Strip leading drive letters and absolute-path markers
+        # e.g. /home/runner/work/PyAegis/PyAegis/pyaegis/foo.py  -> pyaegis/foo.py
+        #      D:/Github/PyAegis/pyaegis/foo.py                   -> pyaegis/foo.py
+        # Strategy: find the last segment that looks like a repo root by checking
+        # for a known top-level directory name in the path.
+        _TOP_DIRS = ("pyaegis/", "tests/", ".github/")
+        uri = raw_path
+        for marker in _TOP_DIRS:
+            idx = raw_path.rfind("/" + marker)
+            if idx != -1:
+                uri = raw_path[idx + 1 :]
+                break
+        else:
+            # fallback: strip everything before the first non-absolute segment
+            uri = _re.sub(r"^(/[^/]+)+/", "", raw_path)
+            if uri.startswith("/"):
+                uri = uri.lstrip("/")
         level = _severity_to_sarif_level(finding.severity)
 
         fix_obj = {
