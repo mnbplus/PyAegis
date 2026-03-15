@@ -8,6 +8,7 @@
     <a href="README.ja.md">日本語</a>
   </p>
 
+  <p>
     <a href="https://pypi.org/project/pyaegis"><img alt="PyPI" src="https://img.shields.io/pypi/v/pyaegis?style=for-the-badge&logo=pypi&logoColor=white"></a>
     <a href="https://python.org"><img alt="Python Supported" src="https://img.shields.io/badge/Python-3.8%20|%203.9%20|%203.10%20|%203.11%20|%203.12-blue.svg?style=for-the-badge&logo=python"></a>
     <a href="https://github.com/mnbplus/PyAegis/actions"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/mnbplus/PyAegis/ci.yml?branch=main&style=for-the-badge&logo=github"></a>
