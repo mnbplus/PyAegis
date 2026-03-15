@@ -9,19 +9,27 @@ theme:
   name: material
   palette:
     scheme: slate
+    primary: deep purple
+    accent: purple
   features:
     - navigation.instant
     - navigation.tracking
     - navigation.sections
+    - navigation.top
     - search.suggest
     - search.highlight
     - content.code.copy
+    - content.code.annotate
 
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Rules:
       - Writing rules: rules.md
+  - Detectors: detectors.md
+  - Output Formats:
+      - SARIF: sarif.md
+  - Performance: performance.md
   - CI/CD integration: ci-integration.md
   - Comparison: comparison.md
   - FAQ: faq.md
@@ -33,3 +41,5 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - pymdownx.details
+  - tables
