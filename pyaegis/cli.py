@@ -502,4 +502,134 @@ def _cmd_fix(args: argparse.Namespace) -> int:
             sev_allow = _parse_severity_csv(args.severity)
         except ValueError as e:
             sys.stderr.write(str(e) + "\n")
-            return
+            return 2
+    if sev_allow is not None:
+        findings = [f for f in findings if (f.severity or "").upper() in sev_allow]
+
+    if not findings:
+        sys.stdout.write(f"No vulnerabilities found in {target}.\n")
+        return 0
+
+    engine = RemediationEngine()
+
+    try:
+        source_code = Path(target).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        source_code = ""
+
+    w = sys.stdout.write
+    w("=" * 64 + "\n")
+    w(f"  PyAegis Fix — {target}\n")
+    w("=" * 64 + "\n")
+    w(f"  {len(findings)} finding(s) found.\n\n")
+
+    patches: list = []  # list of (finding, patch_text)
+
+    for f in findings:
+        sev_label = _colorize_severity(f.severity, use_color)
+        w(f"[{sev_label}] {f.rule_id} — line {f.line_number}\n")
+        w(f"  Context : {f.sink_context}\n")
+
+        rem = engine.get_remediation(f)
+        w(f"  Fix     : {rem.title}\n")
+        w(f"  Hint    : {rem.explanation}\n")
+        w("  Example :\n")
+        for ln in rem.example_after.splitlines():
+            w(f"    {ln}\n")
+
+        patch = engine.generate_fix_patch(f, source_code)
+        if patch:
+            patches.append((f, patch))
+            if args.dry_run or args.apply:
+                w("\n  Diff patch:\n")
+                for pl in patch.splitlines():
+                    if use_color:
+                        if pl.startswith("+") and not pl.startswith("+++"):
+                            pl = f"\x1b[32m{pl}\x1b[0m"
+                        elif pl.startswith("-") and not pl.startswith("---"):
+                            pl = f"\x1b[31m{pl}\x1b[0m"
+                    w(f"    {pl}\n")
+        else:
+            w("  (No automatic patch available for this finding)\n")
+
+        w("\n")
+
+    # --- apply ---
+    if args.apply and patches and not args.dry_run:
+        try:
+            answer = input(
+                f"Apply {len(patches)} patch(es) to '{target}'? "
+                "This will overwrite the file (a .bak backup is created). [y/N] "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+
+        if answer != "y":
+            w("Aborted.\n")
+            return 0
+
+        bak = target + ".bak"
+        shutil.copy2(target, bak)
+        w(f"Backup written to {bak}\n")
+
+        current_source = source_code
+        applied = 0
+        for finding, _patch in patches:
+            new_source = _apply_patch_to_source(current_source, finding, engine)
+            if new_source and new_source != current_source:
+                current_source = new_source
+                applied += 1
+
+        Path(target).write_text(current_source, encoding="utf-8")
+        w(f"Applied {applied} patch(es) to {target}\n")
+
+    return 1  # findings exist
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    argv = list(argv) if argv is not None else sys.argv[1:]
+
+    parser = _build_parser()
+
+    if not argv:
+        parser.print_help(sys.stdout)
+        return 2
+
+    # Backwards-compatibility: pyaegis <path> -> pyaegis scan <path>
+    known_cmds = {"scan", "explain", "list-rules", "init", "version", "fix"}
+    if argv and not argv[0].startswith("-") and argv[0] not in known_cmds:
+        argv = ["scan", *argv]
+
+    args = parser.parse_args(argv)
+
+    if args.version:
+        return _cmd_version()
+
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+
+    cmd = getattr(args, "command", None)
+    if cmd == "version":
+        return _cmd_version()
+    if cmd == "list-rules":
+        return _cmd_list_rules()
+    if cmd == "explain":
+        return _cmd_explain(args.rule_id)
+    if cmd == "init":
+        return _cmd_init(args.force)
+    if cmd == "scan":
+        return _scan(args)
+    if cmd == "fix":
+        return _cmd_fix(args)
+
+    parser.print_help(sys.stdout)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

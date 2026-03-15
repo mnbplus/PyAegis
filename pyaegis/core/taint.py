@@ -209,12 +209,13 @@ class TaintTracker:
 
         for fn_name, meta in cfg.items():
             if isinstance(meta, list):
-                fnmap[fn_name] = _FnContext(name=fn_name, body=meta, args=[])
+                fnmap[fn_name] = _FnContext(name=fn_name, body=meta, args=[], meta={})
             elif isinstance(meta, dict):
                 fnmap[fn_name] = _FnContext(
                     name=fn_name,
                     body=meta.get("body", []) or [],
                     args=meta.get("args", []) or [],
+                    meta=meta,
                 )
 
         # Reset instance taints for this CFG analysis
