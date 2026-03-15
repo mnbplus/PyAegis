@@ -1,3 +1,5 @@
+[English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+
 <div align="center">
 
 ```
@@ -9,7 +11,7 @@
  ╚═╝        ╚═╝   ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝╚══════╝
 ```
 
-**Python向け次世代静的アプリケーションセキュリティテスト（SAST）エンジン**
+**Python向け次世代静的アプリケーションセキュリティテスト（SAST）エンジン。**
 
 <p>
   <a href="https://pypi.org/project/pyaegis"><img alt="PyPI" src="https://img.shields.io/pypi/v/pyaegis?style=for-the-badge&logo=pypi&logoColor=white"></a>
@@ -17,6 +19,7 @@
   <a href="https://github.com/mnbplus/PyAegis/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/mnbplus/PyAegis/ci.yml?branch=main&style=for-the-badge&logo=github"></a>
   <a href="https://codecov.io/gh/mnbplus/PyAegis"><img alt="Coverage" src="https://img.shields.io/codecov/c/github/mnbplus/PyAegis?style=for-the-badge&logo=codecov"></a>
   <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge"></a>
+  <a href="https://github.com/psf/black"><img alt="Code Style" src="https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge"></a>
   <img alt="Powered by PyAegis" src="https://img.shields.io/badge/security-powered%20by%20PyAegis-blueviolet?style=for-the-badge&logo=shield">
 </p>
 
@@ -32,7 +35,7 @@
 
 > **高速。データフロー対応。モダンなCI/CDのために設計。**
 
-**PyAegis** は Python ファーストの SAST ツールです。正規表現マッチングを超え、コードを AST に解析し、軽量な制御フローモデルを構築し、**テイント方式の source → sink 解析**によって本物のインジェクションパスを発見します。
+**PyAegis** は Python ファーストの SAST ツールです。正規表現マッチングを超え、コードを AST に解析し、軽量な制御フローモデルを構築して、**テイント方式の source → sink 解析**によって本物のインジェクションパスを検出します。
 
 ---
 
@@ -41,6 +44,7 @@
 - [仕組み](#仕組み)
 - [検出する脆弱性](#検出する脆弱性)
 - [クイックスタート](#クイックスタート)
+- [実行例](#実行例)
 - [誤検知率](#誤検知率)
 - [使い方](#使い方)
 - [カスタムルールの作成](#カスタムルールの作成)
@@ -48,98 +52,63 @@
 - [他ツールとの比較](#他ツールとの比較)
 - [ロードマップ](#ロードマップ)
 - [コントリビューション](#コントリビューション)
+- [バッジ](#バッジ)
 
 ---
 
 ## 仕組み
 
-1. **収集** — 対象パス以下のすべての `.py` ファイルを探索。
-2. **解析** — 各ファイルの AST を並列でビルド。
-3. **モデル化** — 関数ごとのボディ、引数、呼び出しグラフを抽出。
-4. **テイント分析** — ソースを起点に伝播させ、テイントがシンクに到達したら検知。
-5. **レポート** — text、json、csv、html、sarif で出力。
+1. **収集** — `.py` ファイルを探索
+2. **解析** — AST を並列ビルド
+3. **モデル化** — 関数ごとに解析
+4. **テイント分析** — source から sink への汚染を追跡
+5. **レポート** — `text`/`json`/`csv`/`html`/`sarif` で出力
 
 ---
 
 ## 検出する脆弱性
 
-### コードインジェクション
-| シンク | リスク |
-|--------|--------|
-| eval() | Critical |
-| exec() | Critical |
-| compile() | Critical |
+| カテゴリ | シンク例 | リスク |
+|----------|---------|--------|
+| コードインジェクション | `eval`、`exec`、`compile` | Critical |
+| OSコマンドインジェクション | `os.system`、`subprocess.run`、`subprocess.Popen` | Critical |
+| 安全でないデシリアライゼーション | `pickle.loads`、`yaml.load`、`jsonpickle.decode` | Critical/High |
+| SSRF | `requests.get`、`urllib.request.urlopen` | High |
+| パストラバーサル | `open`、`shutil.*`、`pathlib.Path*` | High |
+| SQLインジェクション | `sqlite3.Cursor.execute`、`sqlalchemy.text` | Critical/High |
+| テンプレートインジェクション（SSTI） | `jinja2.Template`、`mako.template.Template` | Critical |
+| XML / XXE | `xml.etree.ElementTree.parse`、`lxml.etree.parse` | High |
+| ReDoS | `re.compile`、`re.match/search` | Medium |
 
-### OSコマンドインジェクション
-| シンク | リスク |
-|--------|--------|
-| os.system() | Critical |
-| subprocess.run() | Critical |
-| subprocess.Popen() | Critical |
+**追跡されるソース:** `input()`、`sys.argv`、`os.getenv()`、Flask/Django/FastAPI リクエストオブジェクト、`json.loads()` 等
 
-### 安全でないデシリアライゼーション
-| シンク | リスク |
-|--------|--------|
-| pickle.loads() | Critical |
-| yaml.load() | High |
-| marshal.loads() | Critical |
-
-### SSRF
-| シンク | リスク |
-|--------|--------|
-| requests.get/post() | High |
-| urllib.request.urlopen() | High |
-
-### SQLインジェクション
-| シンク | リスク |
-|--------|--------|
-| sqlite3.Cursor.execute() | Critical |
-| sqlalchemy.text() | High |
-
-### テンプレートインジェクション（SSTI）
-| シンク | リスク |
-|--------|--------|
-| jinja2.Template() | Critical |
-
-**追跡されるソース（Source）:**
-
-| カテゴリ | 例 |
-|----------|----|
-| ビルトイン | input()、sys.argv |
-| 環境変数 | os.getenv()、os.environ.get() |
-| Flask/Werkzeug | request.args、request.form、request.json |
-| Django | request.GET、request.POST、request.body |
-| FastAPI | request.query_params、request.path_params |
-
-**既知のサニタイザー**: html.escape、markupsafe.escape、bleach.clean、os.path.abspath、pathlib.Path.resolve
+**既知のサニタイザー:** `html.escape`、`markupsafe.escape`、`bleach.clean`、`os.path.abspath`、`pathlib.Path.resolve` 等
 
 ---
 
 ## クイックスタート
 
-インストール:
 ```bash
 pip install pyaegis
-```
-
-現在のディレクトリをスキャン:
-```bash
 pyaegis scan .
-```
-
-高・重大リスクのみ表示:
-```bash
 pyaegis scan . --severity HIGH,CRITICAL
-```
-
-SARIF形式でエクスポート:
-```bash
 pyaegis scan . --format sarif --output results.sarif
+pyaegis explain PYA-001
+pyaegis list-rules
 ```
 
-ルールの説明:
+---
+
+## 実行例
+
 ```bash
-pyaegis explain PYA-001
+$ pyaegis vuln_example.py
+[-] 3件の潜在的な脆弱性を検出:
+    -> [CRITICAL] テイントデータがシンクに到達: os.system (PYA-TAINT)
+       ファイル: vuln_example.py:8 | コンテキスト: run_command
+
+$ pyaegis safe_example.py
+[+] 脆弱性は検出されませんでした。サブシステムは安全です。
 ```
 
 ---
@@ -148,8 +117,9 @@ pyaegis explain PYA-001
 
 | ツール | アプローチ | 誤検知率（推定） |
 |--------|-----------|------------------|
-| **PyAegis** | AST テイントフロー | **~8–12%** |
-| Bandit | AST パターンマッチ | ~25–35% |
+| **PyAegis** | AST テイントフロー（source→sink） | **~8–12%** |
+| Bandit | AST パターンマッチング | ~25–35% |
+| Semgrep（パターンモード） | 構文パターンマッチ | ~20–40% |
 | Semgrep（テイントモード） | テイント解析 | ~10–18% |
 | 正規表現ベース | テキスト/正規表現 | ~40–60% |
 
@@ -157,45 +127,37 @@ pyaegis explain PYA-001
 
 ## 使い方
 
-```bash
-pyaegis <target> [options]
-```
-
 | フラグ | 説明 | デフォルト |
 |--------|------|------------|
-| target | スキャン対象 | — |
-| --rules | YAMLルールファイル | pyaegis/rules/default.yml |
-| --format | 出力形式: text/json/csv/html/sarif | text |
-| --output | 出力ファイル | stdout |
-| --debug | 詳細ログ | オフ |
+| `target` | スキャン対象 | — |
+| `--rules` | YAML ルールファイル | `pyaegis/rules/default.yml` |
+| `--format` | 出力形式 | `text` |
+| `--output` | 出力ファイル | stdout |
+| `--debug` | 詳細ログ | オフ |
 
-終了コード: 0=発見なし、1=脆弱性検出
+終了コード: `0` = 発見なし、`1` = 検出あり
 
 ---
 
 ## カスタムルールの作成
 
 ```yaml
-# my_rules.yml
 inputs:
   - input
-  - os.getenv
   - request.args
-
 sinks:
   - eval
-  - exec
   - os.system
   - subprocess.*
-
 sanitizers:
   - html.escape
 ```
 
-実行:
 ```bash
 pyaegis ./src --rules my_rules.yml
 ```
+
+詳細: [docs/detectors.md](docs/detectors.md)
 
 ---
 
@@ -204,12 +166,11 @@ pyaegis ./src --rules my_rules.yml
 ### GitHub Actions
 
 ```yaml
-- name: PyAegis SASTスキャン
+- name: PyAegis SAST スキャン
   run: |
     pip install pyaegis
     pyaegis . --format sarif --output pyaegis.sarif
-
-- name: SARIFをGitHub Advanced Securityへアップロード
+- name: SARIF アップロード
   uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: pyaegis.sarif
@@ -236,12 +197,15 @@ sast:
 
 | 機能 | PyAegis | Bandit | Semgrep |
 |------|---------|--------|---------|
-| 言語対応 | Python特化 | Python | 多言語 |
-| 解析手法 | AST テイントフロー | AST パターン | パターン+テイント |
-| Source→Sink追跡 | あり | 限定的 | テイントモードあり |
+| 言語フォーカス | Python ファースト | Python | 多言語 |
+| 解析手法 | AST テイントフロー | AST パターン | パターン + テイント |
+| Source→Sink 追跡 | あり | 限定的 | テイントモードあり |
 | サニタイザー対応 | あり | なし | あり |
-| SARIFネイティブ出力 | あり | なし | あり |
+| 過程間解析 | ローカル + クロスモジュール | なし | あり |
+| SARIF ネイティブ | あり | なし | あり |
+| カスタムルール | YAML | Python プラグイン | YAML |
 | 誤検知率 | ~8–12% | ~25–35% | ~10–40% |
+| インストールサイズ | 最小 | 中程度 | 大 |
 
 ---
 
@@ -249,11 +213,11 @@ sast:
 
 - [ ] Django ORM、SQLAlchemy、テンプレートエンジン向けソース/シンク拡充
 - [ ] モジュール境界をまたいだ過程間追跡の強化
-- [ ] Flaskルートデコレーター、FastAPI依存性注入のフレームワーク対応
-- [ ] ベースライン/抑制機能
+- [ ] Flask ルートデコレーター、FastAPI 依存性注入のフレームワーク対応
+- [ ] ベースライン/抑制機能（既知の問題を無視）
 - [ ] 大規模モノリポジトリの増分スキャン
-- [ ] IDEプラグイン（VS Code、PyCharm）
-- [ ] 検知結果トリアージ向けWeb UI
+- [ ] IDE プラグイン（VS Code、PyCharm）
+- [ ] 検知結果トリアージ向け Web UI
 
 ---
 
@@ -265,8 +229,20 @@ sast:
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - [SECURITY.md](SECURITY.md)
 
+ドキュメントサイト: `docs/` および `mkdocs.yml`（[MkDocs Material](https://squidfunk.github.io/mkdocs-material/) を使用）
+
+---
+
+## バッジ
+
+プロジェクトで PyAegis を使用していますか？バッジを追加してください:
+
+```markdown
+[![security: powered by PyAegis](https://img.shields.io/badge/security-powered%20by%20PyAegis-blueviolet?style=flat-square&logo=shield)](https://github.com/mnbplus/PyAegis)
+```
+
+[![security: powered by PyAegis](https://img.shields.io/badge/security-powered%20by%20PyAegis-blueviolet?style=flat-square&logo=shield)](https://github.com/mnbplus/PyAegis)
+
 ---
 
 <div align="center">
-  <sub>Pythonセキュリティコミュニティへの愛を込めて ❤️</sub>
-</div>
