@@ -6,7 +6,7 @@ import os
 import pickle
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pyaegis.exceptions import ParserError
 
@@ -281,7 +281,9 @@ class ParallelProjectParser:
     - Optional per-file timeout.
     """
 
-    def __init__(self, pool_size: Optional[int] = None, timeout: Optional[float] = None):
+    def __init__(
+        self, pool_size: Optional[int] = None, timeout: Optional[float] = None
+    ):
         self.pool_size = int(pool_size or (os.cpu_count() or 4))
         self.timeout = timeout
         # Built after parse_all completes; available for inter-procedural analysis.
@@ -426,16 +428,19 @@ class ParallelProjectParser:
         # Build global symbol table for inter-procedural analysis.
         try:
             from pyaegis.core.call_graph import GlobalSymbolTable
-            gst = GlobalSymbolTable()
-            for fp, cfg in results.items():
-                if cfg:
-                    gst.register_file(fp, cfg)
+
+            gst = GlobalSymbolTable.build(results.keys())
             self.symbol_table = gst
-            stats = gst.dump_stats()
-            logger.debug(
-                "GlobalSymbolTable built: %d modules, %d functions, %d import aliases",
-                stats["modules"], stats["functions"], stats["import_aliases"],
-            )
+
+            # Optional debug stats when available.
+            if hasattr(gst, "dump_stats"):
+                stats = gst.dump_stats()
+                logger.debug(
+                    "GlobalSymbolTable built: %d modules, %d functions, %d import aliases",
+                    stats.get("modules", 0),
+                    stats.get("functions", 0),
+                    stats.get("import_aliases", 0),
+                )
         except Exception as e:
             logger.warning("Failed to build GlobalSymbolTable: %s", e)
             self.symbol_table = None

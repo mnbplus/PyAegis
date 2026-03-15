@@ -9,7 +9,11 @@ from pyaegis.rules_catalog import get_rule
 
 try:
     # Optional dependency for P0 inter-procedural taint
-    from pyaegis.core.call_graph import GlobalSymbolTable, FunctionSymbol, InterproceduralTaintTracker
+    from pyaegis.core.call_graph import (
+        GlobalSymbolTable,
+        FunctionSymbol,
+        InterproceduralTaintTracker,
+    )
 except Exception:  # pragma: no cover
     GlobalSymbolTable = None  # type: ignore
     FunctionSymbol = None  # type: ignore
@@ -20,8 +24,14 @@ except Exception:  # pragma: no cover
 # Keep this simple and conservative: if a sink matches multiple groups,
 # the first match in order wins.
 _RULE_GROUPS: List[Tuple[str, List[str]]] = [
-    ("PYA-003", ["eval", "exec", "compile", "builtins.eval", "builtins.exec", "runpy.*"]),
-    ("PYA-001", ["os.system", "os.popen", "os.spawn*", "subprocess.*", "commands.getoutput"]),
+    (
+        "PYA-003",
+        ["eval", "exec", "compile", "builtins.eval", "builtins.exec", "runpy.*"],
+    ),
+    (
+        "PYA-001",
+        ["os.system", "os.popen", "os.spawn*", "subprocess.*", "commands.getoutput"],
+    ),
     (
         "PYA-004",
         [
@@ -140,7 +150,10 @@ def _check_conditional_sink(
                     for kw in call_node.keywords:
                         if kw.arg == kw_name:
                             # Check value matches
-                            if isinstance(kw.value, ast.Constant) and kw.value.value == kw_val:
+                            if (
+                                isinstance(kw.value, ast.Constant)
+                                and kw.value.value == kw_val
+                            ):
                                 found = True
                             break
                     if not found:
@@ -231,7 +244,9 @@ class TaintTracker:
         self.symbol_table = symbol_table
         self._ip: Optional["InterproceduralTaintTracker"] = None
         if symbol_table is not None and InterproceduralTaintTracker is not None:
-            self._ip = InterproceduralTaintTracker(symbol_table, max_depth=max_call_depth)
+            self._ip = InterproceduralTaintTracker(
+                symbol_table, max_depth=max_call_depth
+            )
 
     def _call_id(self, file_path: str, fn_name: str) -> str:
         return f"{os.path.abspath(file_path)}::{fn_name}"
@@ -417,7 +432,12 @@ class TaintTracker:
             fnmap = self._build_fnmap_for_file(sym.file_path)
             fnctx = fnmap.get(sym.name)
             if fnctx is None:
-                fnctx = _FnContext(name=sym.name, body=list(getattr(sym.node, "body", []) or []), args=list(sym.args), meta={})
+                fnctx = _FnContext(
+                    name=sym.name,
+                    body=list(getattr(sym.node, "body", []) or []),
+                    args=list(sym.args),
+                    meta={},
+                )
                 fnmap[sym.name] = fnctx
 
             seeded: Set[str] = set(tainted_params)
@@ -458,22 +478,31 @@ class TaintTracker:
         if isinstance(expr, ast.JoinedStr):
             for v in expr.values:
                 if isinstance(v, ast.FormattedValue):
-                    if self._is_tainted_expr(v.value, tainted_vars, fnmap, callstack, tainted_params):
+                    if self._is_tainted_expr(
+                        v.value, tainted_vars, fnmap, callstack, tainted_params
+                    ):
                         return True
             return False
 
         if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Add, ast.Mod)):
-            return self._is_tainted_expr(expr.left, tainted_vars, fnmap, callstack, tainted_params) or self._is_tainted_expr(
+            return self._is_tainted_expr(
+                expr.left, tainted_vars, fnmap, callstack, tainted_params
+            ) or self._is_tainted_expr(
                 expr.right, tainted_vars, fnmap, callstack, tainted_params
             )
 
         if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
-            return any(self._is_tainted_expr(e, tainted_vars, fnmap, callstack, tainted_params) for e in expr.elts)
+            return any(
+                self._is_tainted_expr(e, tainted_vars, fnmap, callstack, tainted_params)
+                for e in expr.elts
+            )
 
         if isinstance(expr, ast.Dict):
             return any(
                 self._is_tainted_expr(k, tainted_vars, fnmap, callstack, tainted_params)
-                or self._is_tainted_expr(v, tainted_vars, fnmap, callstack, tainted_params)
+                or self._is_tainted_expr(
+                    v, tainted_vars, fnmap, callstack, tainted_params
+                )
                 for k, v in zip(expr.keys, expr.values)
                 if k is not None and v is not None
             )
@@ -486,26 +515,38 @@ class TaintTracker:
             )
 
         if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-            if self._is_tainted_expr(expr.elt, tainted_vars, fnmap, callstack, tainted_params):
+            if self._is_tainted_expr(
+                expr.elt, tainted_vars, fnmap, callstack, tainted_params
+            ):
                 return True
             for gen in expr.generators:
-                if self._is_tainted_expr(gen.iter, tainted_vars, fnmap, callstack, tainted_params):
+                if self._is_tainted_expr(
+                    gen.iter, tainted_vars, fnmap, callstack, tainted_params
+                ):
                     return True
                 for if_expr in gen.ifs:
-                    if self._is_tainted_expr(if_expr, tainted_vars, fnmap, callstack, tainted_params):
+                    if self._is_tainted_expr(
+                        if_expr, tainted_vars, fnmap, callstack, tainted_params
+                    ):
                         return True
             return False
 
         if isinstance(expr, ast.DictComp):
-            if self._is_tainted_expr(expr.key, tainted_vars, fnmap, callstack, tainted_params) or self._is_tainted_expr(
+            if self._is_tainted_expr(
+                expr.key, tainted_vars, fnmap, callstack, tainted_params
+            ) or self._is_tainted_expr(
                 expr.value, tainted_vars, fnmap, callstack, tainted_params
             ):
                 return True
             for gen in expr.generators:
-                if self._is_tainted_expr(gen.iter, tainted_vars, fnmap, callstack, tainted_params):
+                if self._is_tainted_expr(
+                    gen.iter, tainted_vars, fnmap, callstack, tainted_params
+                ):
                     return True
                 for if_expr in gen.ifs:
-                    if self._is_tainted_expr(if_expr, tainted_vars, fnmap, callstack, tainted_params):
+                    if self._is_tainted_expr(
+                        if_expr, tainted_vars, fnmap, callstack, tainted_params
+                    ):
                         return True
             return False
 
@@ -514,12 +555,19 @@ class TaintTracker:
             if isinstance(base, ast.Name):
                 inst_name = base.id
                 attr_name = expr.attr
-                if inst_name in self._instance_taints and attr_name in self._instance_taints[inst_name]:
+                if (
+                    inst_name in self._instance_taints
+                    and attr_name in self._instance_taints[inst_name]
+                ):
                     return True
-            return self._is_tainted_expr(base, tainted_vars, fnmap, callstack, tainted_params)
+            return self._is_tainted_expr(
+                base, tainted_vars, fnmap, callstack, tainted_params
+            )
 
         if isinstance(expr, ast.Subscript):
-            return self._is_tainted_expr(expr.value, tainted_vars, fnmap, callstack, tainted_params)
+            return self._is_tainted_expr(
+                expr.value, tainted_vars, fnmap, callstack, tainted_params
+            )
 
         if self._is_sanitizer_call(expr):
             return False
@@ -551,34 +599,65 @@ class TaintTracker:
                 sym = self._ip.resolve_symbol(expr, caller_file=self._current_file)
                 if sym is not None:
                     callee_tainted_params = self._map_call_tainted_params(
-                        expr, list(sym.args), tainted_vars, fnmap, callstack, tainted_params
+                        expr,
+                        list(sym.args),
+                        tainted_vars,
+                        fnmap,
+                        callstack,
+                        tainted_params,
                     )
 
-                    if callee_tainted_params and len(callstack) < self._ip.max_depth:
-                        self._analyze_symbol_if_needed(sym, callee_tainted_params, callstack)
+                    # When we can resolve the callee symbol, try to compute its return taint
+                    # even if no arguments are tainted. This enables propagation for helpers
+                    # that fetch taint sources internally (e.g. input(), os.getenv()).
+                    if len(callstack) < self._ip.max_depth:
+                        if callee_tainted_params:
+                            self._analyze_symbol_if_needed(
+                                sym, callee_tainted_params, callstack
+                            )
 
                         ext_fnmap = self._build_fnmap_for_file(sym.file_path)
                         return self._function_returns_tainted(
                             fn=sym.name,
-                            fnmap=ext_fnmap or {sym.name: _FnContext(sym.name, list(getattr(sym.node, "body", []) or []), list(sym.args), meta={})},
+                            fnmap=ext_fnmap
+                            or {
+                                sym.name: _FnContext(
+                                    sym.name,
+                                    list(getattr(sym.node, "body", []) or []),
+                                    list(sym.args),
+                                    meta={},
+                                )
+                            },
                             filepath=sym.file_path,
                             tainted_params=callee_tainted_params,
                             callstack=callstack,
                         )
 
                     # If depth exceeded, fall back to heuristic.
-                    if any(self._is_tainted_expr(a, tainted_vars, fnmap, callstack, tainted_params) for a in expr.args):
+                    if any(
+                        self._is_tainted_expr(
+                            a, tainted_vars, fnmap, callstack, tainted_params
+                        )
+                        for a in expr.args
+                    ):
                         return True
                     for kw in expr.keywords:
-                        if kw.value and self._is_tainted_expr(kw.value, tainted_vars, fnmap, callstack, tainted_params):
+                        if kw.value and self._is_tainted_expr(
+                            kw.value, tainted_vars, fnmap, callstack, tainted_params
+                        ):
                             return True
                     return False
 
             # Unknown calls: heuristic — tainted args taint the return value
-            if any(self._is_tainted_expr(a, tainted_vars, fnmap, callstack, tainted_params) for a in expr.args):
+            if any(
+                self._is_tainted_expr(a, tainted_vars, fnmap, callstack, tainted_params)
+                for a in expr.args
+            ):
                 return True
             for kw in expr.keywords:
-                if kw.value and self._is_tainted_expr(kw.value, tainted_vars, fnmap, callstack, tainted_params):
+                if kw.value and self._is_tainted_expr(
+                    kw.value, tainted_vars, fnmap, callstack, tainted_params
+                ):
                     return True
 
         return False
@@ -641,7 +720,9 @@ class TaintTracker:
                 if isinstance(node, ast.Assign):
                     value = node.value
                     is_clean = self._is_sanitizer_call(value)
-                    is_tainted = self._is_tainted_expr(value, tainted_vars, fnmap, callstack, tainted_params)
+                    is_tainted = self._is_tainted_expr(
+                        value, tainted_vars, fnmap, callstack, tainted_params
+                    )
 
                     for target in node.targets:
                         if isinstance(target, ast.Name):
@@ -650,29 +731,45 @@ class TaintTracker:
                             elif is_tainted:
                                 tainted_vars.add(target.id)
                         elif isinstance(target, (ast.Tuple, ast.List)):
-                            self._taint_unpack_target(target, tainted_vars, is_tainted, is_clean)
+                            self._taint_unpack_target(
+                                target, tainted_vars, is_tainted, is_clean
+                            )
                         elif isinstance(target, ast.Attribute):
-                            self._record_instance_attr_taint(target, is_tainted, is_clean)
+                            self._record_instance_attr_taint(
+                                target, is_tainted, is_clean
+                            )
 
-                if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                if isinstance(node, ast.AnnAssign) and isinstance(
+                    node.target, ast.Name
+                ):
                     value = node.value
                     if value is None:
                         continue
                     if self._is_sanitizer_call(value):
                         tainted_vars.discard(node.target.id)
-                    elif self._is_tainted_expr(value, tainted_vars, fnmap, callstack, tainted_params):
+                    elif self._is_tainted_expr(
+                        value, tainted_vars, fnmap, callstack, tainted_params
+                    ):
                         tainted_vars.add(node.target.id)
 
-                if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
-                    if self._is_tainted_expr(node.value, tainted_vars, fnmap, callstack, tainted_params):
+                if isinstance(node, ast.AugAssign) and isinstance(
+                    node.target, ast.Name
+                ):
+                    if self._is_tainted_expr(
+                        node.value, tainted_vars, fnmap, callstack, tainted_params
+                    ):
                         tainted_vars.add(node.target.id)
 
                 if isinstance(node, ast.Call):
                     sink_name = self._get_full_name(node.func)
                     if sink_name and self._matches_any(sink_name, self.sinks):
-                        if self._call_has_tainted_arg(node, tainted_vars, fnmap, callstack, tainted_params):
+                        if self._call_has_tainted_arg(
+                            node, tainted_vars, fnmap, callstack, tainted_params
+                        ):
                             cs_match = (
-                                _check_conditional_sink(sink_name, node, self.conditional_sinks, filepath)
+                                _check_conditional_sink(
+                                    sink_name, node, self.conditional_sinks, filepath
+                                )
                                 if self.conditional_sinks
                                 else None
                             )
@@ -724,7 +821,9 @@ class TaintTracker:
             if self._is_tainted_expr(a, tainted_vars, fnmap, callstack, tainted_params):
                 return True
         for kw in call.keywords:
-            if kw.value and self._is_tainted_expr(kw.value, tainted_vars, fnmap, callstack, tainted_params):
+            if kw.value and self._is_tainted_expr(
+                kw.value, tainted_vars, fnmap, callstack, tainted_params
+            ):
                 return True
         return False
 
@@ -761,7 +860,9 @@ class TaintTracker:
                     for t in node.targets:
                         if isinstance(t, ast.Name):
                             local_tainted.discard(t.id)
-                elif self._is_tainted_expr(value, local_tainted, fnmap, callstack + [call_id], tainted_params):
+                elif self._is_tainted_expr(
+                    value, local_tainted, fnmap, callstack + [call_id], tainted_params
+                ):
                     for t in node.targets:
                         if isinstance(t, ast.Name):
                             local_tainted.add(t.id)
@@ -769,7 +870,11 @@ class TaintTracker:
                             self._taint_unpack_target(t, local_tainted, True, False)
             elif isinstance(node, ast.Return):
                 if node.value is not None and self._is_tainted_expr(
-                    node.value, local_tainted, fnmap, callstack + [call_id], tainted_params
+                    node.value,
+                    local_tainted,
+                    fnmap,
+                    callstack + [call_id],
+                    tainted_params,
                 ):
                     returns_tainted = True
 
