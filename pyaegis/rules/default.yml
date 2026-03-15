@@ -11,6 +11,10 @@
 #   conditions.has_kwarg  : only trigger when call has a specific kwarg=value
 #   conditions.not_in_test_file: skip if file path looks like a test file
 
+# Optional: inter-procedural analysis depth when a global symbol table is available.
+# Higher values can catch longer cross-module chains but may increase runtime.
+max_call_depth: 3
+
 # ── Unconditional sinks (keep for backward compat + glob matching) ──────────
 sinks:
   # Code execution
@@ -89,6 +93,11 @@ sinks:
   - MySQLdb.connect
   - pymysql.connect
   - sqlalchemy.text
+
+  # Django ORM raw SQL (P1)
+  # `.raw()` executes raw SQL; `.filter()` is parameterized and should not be flagged.
+  - '*.objects.raw'
+  - '*.raw'
 
   # XXE / XML
   - xml.etree.ElementTree.parse

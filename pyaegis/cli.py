@@ -391,12 +391,20 @@ def _run_taint_scan(
     proj_parser = ParallelProjectParser(pool_size=workers, timeout=timeout)
     cfgs = proj_parser.parse_all(py_files, show_progress=show_progress)
 
+    raw_depth = rules.get("max_call_depth")
+    try:
+        max_call_depth = int(raw_depth) if raw_depth is not None else 3
+    except (TypeError, ValueError):
+        max_call_depth = 3
+
     tracker = TaintTracker(
         sources=rules.get("inputs", []),
         sinks=rules.get("sinks", []),
         sanitizers=rules.get("sanitizers", []),
         conditional_sinks=rules.get("conditional_sinks", []),
         source_decorators=rules.get("source_decorators", []),
+        symbol_table=proj_parser.symbol_table,
+        max_call_depth=max_call_depth,
     )
     for filepath, cfg in cfgs.items():
         if cfg:

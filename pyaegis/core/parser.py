@@ -66,12 +66,17 @@ class PyASTParser:
         # Note: bandit uses an ast.NodeVisitor with node-specific hooks.
         # Here we keep things minimal, but avoid repeated ast.walk() where possible.
         for node in ast.walk(self.tree):
-            if not isinstance(node, ast.FunctionDef):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
 
             decorators, routes = self._extract_decorators(node.decorator_list)
             calls = sorted(self._extract_calls(node))
-            args = [a.arg for a in node.args.args]
+
+            # Include pos-only and kw-only args for better framework support.
+            args: List[str] = []
+            args.extend([a.arg for a in getattr(node.args, "posonlyargs", [])])
+            args.extend([a.arg for a in node.args.args])
+            args.extend([a.arg for a in node.args.kwonlyargs])
 
             functions[node.name] = {
                 "body": node.body,

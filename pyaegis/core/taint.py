@@ -91,6 +91,8 @@ _RULE_GROUPS: List[Tuple[str, List[str]]] = [
             "MySQLdb.connect",
             "pymysql.connect",
             "sqlalchemy.text",
+            "*.objects.raw",
+            "*.raw",
         ],
     ),
 ]
@@ -241,6 +243,11 @@ class TaintTracker:
         # current context
         self._current_file: str = ""
 
+        # import_map for the file currently being analysed:
+        # { local_name -> absolute_qualname }  e.g. {"get_cmd": "utils.get_cmd"}
+        # Built fresh in analyze_cfg() so it always matches the caller file.
+        self._import_map: Dict[str, str] = {}
+
         self.symbol_table = symbol_table
         self._ip: Optional["InterproceduralTaintTracker"] = None
         if symbol_table is not None and InterproceduralTaintTracker is not None:
@@ -250,6 +257,53 @@ class TaintTracker:
 
     def _call_id(self, file_path: str, fn_name: str) -> str:
         return f"{os.path.abspath(file_path)}::{fn_name}"
+
+    def _build_import_map(self, filepath: str) -> Dict[str, str]:
+        """Parse import statements in *filepath* and return a mapping
+        ``{local_name -> absolute_qualname}``.
+
+        Examples::
+
+            from utils import get_cmd        -> {"get_cmd": "utils.get_cmd"}
+            from utils import get_cmd as gc  -> {"gc":      "utils.get_cmd"}
+            import utils                     -> {"utils":   "utils"}          (module alias)
+            import utils as u                -> {"u":       "utils"}
+            import pkg.mod as m              -> {"m":       "pkg.mod"}
+
+        The result is used to resolve calls that are not in the local fnmap so
+        that we can look them up in the GlobalSymbolTable and propagate taint
+        across file boundaries.
+        """
+        # Delegate to _ip's cached parser when available to avoid double I/O.
+        if self._ip is not None:
+            _mod_aliases, _name_aliases = self._ip._parse_imports(filepath)
+            result: Dict[str, str] = {}
+            result.update(_name_aliases)   # local -> full qualname  (from x import y)
+            result.update(_mod_aliases)    # local -> module name    (import x as y)
+            return result
+
+        # Fallback: parse ourselves (no symbol_table configured).
+        result = {}
+        try:
+            with open(os.path.abspath(filepath), "r", encoding="utf-8") as fh:
+                src = fh.read()
+            tree = ast.parse(src, filename=filepath)
+        except Exception:
+            return result
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    local = alias.asname or alias.name.split(".")[-1]
+                    result[local] = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    local = alias.asname or alias.name
+                    full = f"{mod}.{alias.name}" if mod else alias.name
+                    result[local] = full
+        return result
 
     def analyze_cfg(self, cfg: Dict[str, Any], filepath: str):
         """Perform taint tracking for a single file's extracted CFG.
@@ -275,6 +329,11 @@ class TaintTracker:
 
         # Reset instance taints for this CFG analysis
         self._instance_taints = {}
+
+        # Build import_map for this file so that calls to imported functions
+        # (not present in local fnmap) can be resolved to their absolute
+        # qualnames and looked up in the GlobalSymbolTable.
+        self._import_map = self._build_import_map(filepath)
 
         for fn_name, fnctx in fnmap.items():
             # Seed taint: if the function has a parameter named like a source root
@@ -594,6 +653,62 @@ class TaintTracker:
                     callstack=callstack,
                 )
 
+            # Inter-procedural: import_map resolution.
+            # When the local fnmap has no entry for `fn`, check if it was
+            # imported into this file.  The import_map was built by
+            # _build_import_map() in analyze_cfg() and maps
+            #   local_name -> absolute_qualname  (e.g. "get_cmd" -> "utils.get_cmd")
+            # We resolve it against the GlobalSymbolTable directly, bypassing
+            # the need for an ast.Call walk inside InterproceduralTaintTracker.
+            if fn and self._import_map and self.symbol_table is not None:
+                qualname = self._import_map.get(fn)
+                # Also handle dotted calls like  u.get_data  where  u -> utils
+                if qualname is None and "." in fn:
+                    head, rest = fn.split(".", 1)
+                    mod_qualname = self._import_map.get(head)
+                    if mod_qualname is not None:
+                        qualname = f"{mod_qualname}.{rest}"
+                if qualname is not None:
+                    sym = self.symbol_table.get(qualname)
+                    if sym is None:
+                        # Try by bare function name if unique
+                        bare = qualname.split(".")[-1]
+                        cands = self.symbol_table.get_by_name(bare)
+                        if len(cands) == 1:
+                            sym = cands[0]
+                    if sym is not None:
+                        callee_tainted_params = self._map_call_tainted_params(
+                            expr,
+                            list(sym.args),
+                            tainted_vars,
+                            fnmap,
+                            callstack,
+                            tainted_params,
+                        )
+                        max_d = self._ip.max_depth if self._ip is not None else 3
+                        if len(callstack) < max_d:
+                            if callee_tainted_params:
+                                self._analyze_symbol_if_needed(
+                                    sym, callee_tainted_params, callstack
+                                )
+                            ext_fnmap = self._build_fnmap_for_file(sym.file_path)
+                            if not ext_fnmap:
+                                ext_fnmap = {
+                                    sym.name: _FnContext(
+                                        sym.name,
+                                        list(getattr(sym.node, "body", []) or []),
+                                        list(sym.args),
+                                        meta={},
+                                    )
+                                }
+                            return self._function_returns_tainted(
+                                fn=sym.name,
+                                fnmap=ext_fnmap,
+                                filepath=sym.file_path,
+                                tainted_params=callee_tainted_params,
+                                callstack=callstack,
+                            )
+
             # Inter-procedural: cross-module via global symbol table
             if self._ip is not None:
                 sym = self._ip.resolve_symbol(expr, caller_file=self._current_file)
@@ -762,6 +877,77 @@ class TaintTracker:
 
                 if isinstance(node, ast.Call):
                     sink_name = self._get_full_name(node.func)
+
+                    # --- Inter-procedural sink propagation ---
+                    # For non-sink calls, if any arg is tainted and we can resolve
+                    # the callee cross-module, analyze it for sinks (e.g. execute(cmd)).
+                    if (
+                        sink_name
+                        and not self._matches_any(sink_name, self.sinks)
+                        and len(callstack) < (self._ip.max_depth if self._ip is not None else 3)
+                    ):
+                        # Only bother if at least one arg is tainted
+                        if self._call_has_tainted_arg(
+                            node, tainted_vars, fnmap, callstack, tainted_params
+                        ):
+                            # Local fnmap first
+                            if sink_name not in fnmap:
+                                sym = None
+                                # Primary: resolve via _ip (handles import aliases)
+                                if self._ip is not None:
+                                    sym = self._ip.resolve_symbol(
+                                        node, caller_file=self._current_file
+                                    )
+                                # Fallback: resolve via import_map directly
+                                if sym is None and self._import_map and self.symbol_table is not None:
+                                    qualname = self._import_map.get(sink_name)
+                                    if qualname is None and "." in sink_name:
+                                        head, rest = sink_name.split(".", 1)
+                                        mod_q = self._import_map.get(head)
+                                        if mod_q is not None:
+                                            qualname = f"{mod_q}.{rest}"
+                                    if qualname is not None:
+                                        sym = self.symbol_table.get(qualname)
+                                        if sym is None:
+                                            bare = qualname.split(".")[-1]
+                                            cands = self.symbol_table.get_by_name(bare)
+                                            if len(cands) == 1:
+                                                sym = cands[0]
+                                if sym is not None:
+                                    callee_tp = self._map_call_tainted_params(
+                                        node,
+                                        list(sym.args),
+                                        tainted_vars,
+                                        fnmap,
+                                        callstack,
+                                        tainted_params,
+                                    )
+                                    self._analyze_symbol_if_needed(
+                                        sym, callee_tp, callstack
+                                    )
+                            else:
+                                # Local callee: recurse analyze for intra-procedural sinks
+                                callee = fnmap[sink_name]
+                                callee_tp = self._map_call_tainted_params(
+                                    node,
+                                    callee.args,
+                                    tainted_vars,
+                                    fnmap,
+                                    callstack,
+                                    tainted_params,
+                                )
+                                if callee_tp:
+                                    call_id = self._call_id(filepath, sink_name)
+                                    if call_id not in callstack:
+                                        self._analyze_function(
+                                            fnctx=callee,
+                                            fnmap=fnmap,
+                                            filepath=filepath,
+                                            tainted_vars=set(callee_tp),
+                                            tainted_params=callee_tp,
+                                            callstack=callstack + [call_id],
+                                        )
+
                     if sink_name and self._matches_any(sink_name, self.sinks):
                         if self._call_has_tainted_arg(
                             node, tainted_vars, fnmap, callstack, tainted_params

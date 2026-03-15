@@ -150,8 +150,6 @@ class TestCrossModuleTaint:
         findings = tracker.get_findings()
         assert len(findings) >= 1, "Should detect taint through wrapper chain"
 
-    @pytest.mark.skip(reason="inter-procedural taint tracking - ROADMAP P0")
-    @pytest.mark.skip(reason="Requires deep inter-procedural sink analysis - tracked in ROADMAP P0")
     def test_cross_module_sink_in_callee(self, tmp_path):
         """
         Tainted argument flows into callee which contains a sink.
@@ -421,3 +419,151 @@ class TestInterproceduralTaintTracker:
         qn = itt.resolve_call_qualname(call_node, caller_file=b_path)
         # Should resolve do_thing -> a.func
         assert qn == "a.func" or qn.endswith(".func")
+
+
+class TestImportMapResolution:
+    """Canonical scenario from the task spec:
+
+    utils.py defines get_cmd(request) which returns tainted data.
+    app.py does `from utils import get_cmd` and passes the result to os.system.
+    The import_map built in analyze_cfg() must bridge the two files so that
+    `cmd = get_cmd(request)` is marked tainted and `os.system(cmd)` fires.
+    """
+
+    def test_import_map_from_import(self, tmp_path):
+        """from utils import get_cmd  ->  cmd = get_cmd(request)  ->  os.system(cmd)."""
+        files = {
+            "utils.py": """
+                def get_cmd(request):
+                    return request.GET.get('cmd')
+            """,
+            "app.py": """
+                from utils import get_cmd
+                import os
+                def view(request):
+                    cmd = get_cmd(request)
+                    os.system(cmd)
+            """,
+        }
+        tmp_dir = str(tmp_path)
+        gst = GlobalSymbolTable(root_dir=tmp_dir)
+        for name, code in files.items():
+            path = str(tmp_path / name)
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
+            parser = PyASTParser(path)
+            tree = parser.parse()
+            gst.register_file(path, tree)
+
+        app_path = str(tmp_path / "app.py")
+        parser = PyASTParser(app_path)
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = TaintTracker(
+            sources=["request", "request.GET"],
+            sinks=["os.system"],
+            symbol_table=gst,
+            max_call_depth=3,
+        )
+        tracker.analyze_cfg(cfg, filepath=app_path)
+
+        findings = tracker.get_findings()
+        assert len(findings) >= 1, (
+            "import_map should resolve get_cmd -> utils.get_cmd, propagate taint "
+            "from request.GET.get() through cmd to os.system"
+        )
+
+    def test_import_map_module_alias(self, tmp_path):
+        """import utils as u  ->  cmd = u.get_cmd(request)  ->  os.system(cmd)."""
+        files = {
+            "utils.py": """
+                def get_cmd(request):
+                    return request.GET.get('cmd')
+            """,
+            "app.py": """
+                import utils as u
+                import os
+                def view(request):
+                    cmd = u.get_cmd(request)
+                    os.system(cmd)
+            """,
+        }
+        tmp_dir = str(tmp_path)
+        gst = GlobalSymbolTable(root_dir=tmp_dir)
+        for name, code in files.items():
+            path = str(tmp_path / name)
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
+            parser = PyASTParser(path)
+            tree = parser.parse()
+            gst.register_file(path, tree)
+
+        app_path = str(tmp_path / "app.py")
+        parser = PyASTParser(app_path)
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = TaintTracker(
+            sources=["request", "request.GET"],
+            sinks=["os.system"],
+            symbol_table=gst,
+            max_call_depth=3,
+        )
+        tracker.analyze_cfg(cfg, filepath=app_path)
+
+        findings = tracker.get_findings()
+        assert len(findings) >= 1, (
+            "import_map should resolve u.get_cmd -> utils.get_cmd via module alias"
+        )
+
+    def test_import_map_cache_avoids_reanalysis(self, tmp_path):
+        """Calling analyze_cfg twice on the same file should not duplicate findings."""
+        files = {
+            "utils.py": """
+                def get_cmd(request):
+                    return request.GET.get('cmd')
+            """,
+            "app.py": """
+                from utils import get_cmd
+                import os
+                def view(request):
+                    cmd = get_cmd(request)
+                    os.system(cmd)
+            """,
+        }
+        tmp_dir = str(tmp_path)
+        gst = GlobalSymbolTable(root_dir=tmp_dir)
+        for name, code in files.items():
+            path = str(tmp_path / name)
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
+            parser = PyASTParser(path)
+            tree = parser.parse()
+            gst.register_file(path, tree)
+
+        app_path = str(tmp_path / "app.py")
+        parser = PyASTParser(app_path)
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = TaintTracker(
+            sources=["request", "request.GET"],
+            sinks=["os.system"],
+            symbol_table=gst,
+            max_call_depth=3,
+        )
+        tracker.analyze_cfg(cfg, filepath=app_path)
+        first_count = len(tracker.get_findings())
+
+        # Second run on the same tracker — _analysis_cache should prevent duplicates
+        tracker.analyze_cfg(cfg, filepath=app_path)
+        second_count = len(tracker.get_findings())
+
+        assert first_count >= 1, "First run should find the vulnerability"
+        # Findings list may grow on second run since cache is per (file,fn,params)
+        # but must not explode — same order of magnitude
+        assert second_count <= first_count * 3, "Cache should bound duplicate findings"

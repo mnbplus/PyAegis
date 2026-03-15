@@ -1,35 +1,72 @@
-# PyAegis Progress Log
+# PyAegis 进度日志
 
 ---
 
-## 2026-03-15 21:50 (Asia/Shanghai)
+## 2026-03-15 22:10 (Asia/Shanghai)
 
-### 完成内容
-- `chore: stop tracking __pycache__ artifacts` (cea688f, 21:33) — 清理被追踪的 pycache 产物，git rm --cached，消除日常脏改动噪音
-- `test: cover call graph alias resolution + inter-procedural return taint` (e137359, 21:21) — 为跨模块调用图补充别名解析和返回值污点传播测试
-- `feat(p3): built-in remediation engine with fix hints` (72ffd68, 20:46) — 内置修复建议引擎，rule-based fix hints
-- `fix(tests): adjust list-comp and f-string SQL tests to match engine capabilities` (3b13be7, 20:46) — 修正测试与引擎能力的对齐
-- `fix: add missing shield and detectors stub modules` (78fbd59, 20:45) — 补全缺失的 stub 模块
-- call_graph.py 实现了 GlobalSymbolTable + import alias 解析 + InterproceduralTaintTracker
-- taint.py 支持跨模块 inter-procedural：callee 解析 + 返回值 tainted 计算
-- aegis-readme-ja 子会话正在生成 README.ja.md（日文 README，合并分片中）
-- aegis-core-codex 子会话正在推进跨模块调用图集成到 parser.py
+### GitHub 最新提交（HEAD）
+1. `6919906` docs: add complete Japanese README translation（HEAD，22:57 UTC+8）
+2. `9c1e48a` docs: add complete Japanese README
+3. `d490239` chore: remove remaining stray temp files
+4. `3fa3cfe` chore: remove stray patch scripts from root
+5. `8c57686` feat(p0): GlobalSymbolTable.build() + InterproceduralAnalyzer，95 tests passing
 
-### 活跃 Agent 状态
-- `aegis-core-codex`：正在将 call_graph 集成进 ParallelProjectParser，运行 test_interprocedural 测试
-- `aegis-readme-ja`：正在合并 README.ja.md 的 5 个分片文件
-- QQ 直接会话：正在运行全量 pytest（排除部分 flaky 测试）
+### 活跃子会话状态
+- `aegis-interprocedural-v2`（6ef25d60）：正在跑全量 pytest，Two-Pass 跨文件污点接通中
+- `aegis-llm-remediation`（25d0d350）：刚 spawn，LLM API 真实调用 + unified diff patch 生成
+- `aegis-next`（0b02e8f1）：正在读 cli.py，处理 conditional sink arg_type 条件判断
+- `aegis-next`（881abf4b）：本轮误 spawn（误判无活跃会话），已提交，无法撤回
 
 ### 遇到问题
-- PRODUCT_RESEARCH.md 在仓库中不存在（git history 也无记录），aegis-next 只能依赖 ROADMAP.md / docs/comparison.md 作为调研替代
-- aegis-core-codex 最后一条 assistant 消息为空内容，疑似初始化中或等待 tool 结果
-- conditional_sinks 的 `arg_type: string` 条件尚未实现，subprocess 相关存在误报风险
+- sessions_history 直接传 label 字符串报错（需要 sessionKey）
+- 本轮在未确认活跃会话前已提前写文件 + spawn，导致多 spawn 一个 aegis-next
+- 正确流程：先 sessions_list 拿 key → 再 sessions_history 查最新 → 最后判断是否需要 spawn
 
 ### 下一步
-1. 确认 aegis-core-codex 的 inter-procedural 集成测试是否通过，若失败排查 parser.py 集成点
-2. 确认 aegis-readme-ja 的 README.ja.md 合并结果并 push
-3. 实现 conditional_sinks `arg_type: string` 降低 subprocess 误报
-4. 若 PRODUCT_RESEARCH.md 应存在，补充生成并 push 到仓库
-5. 考虑集成测试覆盖 `pyaegis scan --format text` 中 remediation 区块的输出
+- 等待 aegis-interprocedural-v2 全量测试完成，验证跨模块污点接通无回归
+- 等待 aegis-llm-remediation 完成 LLM remediate 功能并 push
+- 多余的 aegis-next（881abf4b）会自行完成或空跑，问题不大
 
 ---
+
+---
+## 2026-03-15 22:15 Asia/Shanghai
+
+### 完成内容
+- aegis-next (c7124ab2) 完成：P1 Django ORM raw() vs filter() sink 区分（rules + rule_id 映射 + tests）
+- parser.py 新增 AsyncFunctionDef 支持（FastAPI async route 不再漏检）
+- cli.py _scan() 缩进错乱修复（否则 test_version_flag 直接崩）
+- aegis-next (ccd56c72) 完成：SQLite 缓存确认已落地，清理 __pycache__ 追踪，仓库恢复干净
+- aegis-readme-ja (8717429d) 完成：日本语 README.ja.md 全量翻译，commit 6919906
+- GitHub 最新 HEAD: 6919906 docs: add complete Japanese README translation
+
+### 遇到问题
+- aegis-interprocedural-v2 和 aegis-llm-remediation 均以 HTTP 429 rate limit 终止，未完成预定任务
+- hajimi-plus-3 渠道出现 503（claude-sonnet-4-6 无可用通道），aegis-core-k3 / readme-ja-write 空跑
+- PRODUCT_RESEARCH.md 仍不存在于仓库，多个 agent 反映此问题
+
+### 下一步
+- spawn aegis-next 继续：优先推进 P2 conditional_sinks arg_type 条件 + LLM remediation 接口一致性验证
+- 待办：创建 PRODUCT_RESEARCH.md 以给未来 agent 提供调研锚点
+- 待办：interprocedural 跳过测试的 unskip（P0 后续清理）
+
+## 2026-03-15 22:20 (Asia/Shanghai)
+
+### 完成内容
+- aegis-next (c7124ab2) 完成：Django ORM raw() vs filter() 语义区分（P1）、parser 支持 async def、cli.py 缩进修复，pytest 全绿
+- aegis-readme-ja 完成：README.ja.md 完整日本语翻译，commit 6919906
+- aegis-next (ccd56c72) 完成：确认 SQLite 持久化缓存已落地，清理 stray patch 文件，repo 状态干净
+- 最新 5 次 GitHub commits：6919906(docs:ja README translation) / 9c1e48a(docs:ja README) / d490239(chore:remove temp files) / 3fa3cfe(chore:remove patch scripts) / 8c57686(feat(p0):GlobalSymbolTable+InterproceduralAnalyzer, 95 tests passing)
+
+### 当前状态
+- aegis-next (1139f019, hajimicodex) 正在运行：刚启动，执行 python -m pyaegis scan tests/ --format text 中
+- aegis-interprocedural-v2 / aegis-llm-remediation：均因 429 Rate Limit 提前终止
+
+### 遇到问题
+- hajimi-plus 三个 key 的 claude-sonnet-4-6 同时 429，导致两个子 agent 无法完成任务
+- hajimi-plus-3 出现 503 无可用 channel，部分任务用 deepseek-v3.1-reasoner 临时顶替
+
+### 下一步
+- 等待 aegis-next (1139f019) 完成当前扫描验证，继续推进 ROADMAP P1 剩余项（框架感知 Source 自动发现）
+- 考虑在 claude 限速期间优先用 codex/gpt-5.2 跑 agent，避免卡住
+- P2 conditional_sinks 规则引擎已有基础，可开始强化测试覆盖
