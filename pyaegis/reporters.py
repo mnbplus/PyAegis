@@ -703,13 +703,6 @@ class SARIFReporter:
         result: Dict[str, Any] = {
             "ruleId": finding.rule_id,
             "level": level,
-            "rank": {
-                "CRITICAL": 95.0,
-                "HIGH": 80.0,
-                "MEDIUM": 50.0,
-                "LOW": 25.0,
-                "INFO": 5.0,
-            }.get((finding.severity or "").upper(), 50.0),
             "message": {
                 "text": (
                     f"{finding.description} "

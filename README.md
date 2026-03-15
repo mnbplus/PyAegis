@@ -305,6 +305,59 @@ pyaegis <target> [options]
 - `0` — no findings
 - `1` — findings detected or fatal scan error
 
+### Programmatic API (JSON/CSV)
+
+PyAegis also exposes a headless API via `pyaegis.api`. Example:
+
+```python
+from pyaegis.api import scan_code_string
+
+payload = scan_code_string(code, return_format="json")
+```
+
+**JSON payload** (when `return_format="json"`):
+
+```json
+{
+  "meta": {
+    "scan_time": "2026-03-16T02:00:00Z",
+    "total_files_scanned": 1,
+    "duration_seconds": 0.012,
+    "total_findings": 1
+  },
+  "findings": [
+    {
+      "filename": "<string>",
+      "line": 5,
+      "col": 0,
+      "severity": "CRITICAL",
+      "rule_id": "PYA-TAINT",
+      "sink_name": "os.system",
+      "source_var": "request.args",
+      "message": "Tainted data reaches sink: os.system",
+      "sink_context": "view"
+    }
+  ]
+}
+```
+
+**CSV output** (when `return_format="csv"`) is a string with header:
+
+```
+rule_id,severity,message,filename,line,sink_name,source_var,sink_context
+```
+
+Field meanings (JSON + CSV):
+- `filename`: file path or virtual filename (for `scan_code_string`).
+- `line`: 1-based line number for the sink.
+- `col`: column (currently always `0`).
+- `severity`: INFO/LOW/MEDIUM/HIGH/CRITICAL.
+- `rule_id`: rule identifier (e.g., `PYA-TAINT`).
+- `sink_name`: dangerous API reached by tainted data.
+- `source_var`: originating source expression.
+- `message`: human-readable description.
+- `sink_context`: containing function or context label.
+
 ---
 
 ## Writing Custom Rules
@@ -376,8 +429,8 @@ Full examples: [docs/ci-integration.md](docs/ci-integration.md)
 
 ## Why PyAegis?
 
-> Most Python security scanners rely on simple regex or shallow AST pattern matching.  
-> PyAegis tracks **actual data-flow** from untrusted sources to dangerous sinks,  
+> Most Python security scanners rely on simple regex or shallow AST pattern matching.
+> PyAegis tracks **actual data-flow** from untrusted sources to dangerous sinks,
 > crossing function and module boundaries — with a false positive rate of ~8–12%.
 
 → [Full comparison with Bandit & Semgrep](docs/comparison.md)
