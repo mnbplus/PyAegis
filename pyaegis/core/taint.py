@@ -341,8 +341,8 @@ class TaintTracker:
         if self._ip is not None:
             _mod_aliases, _name_aliases = self._ip._parse_imports(filepath)
             result: Dict[str, str] = {}
-            result.update(_name_aliases)   # local -> full qualname  (from x import y)
-            result.update(_mod_aliases)    # local -> module name    (import x as y)
+            result.update(_name_aliases)  # local -> full qualname  (from x import y)
+            result.update(_mod_aliases)  # local -> module name    (import x as y)
             return result
 
         # Fallback: parse ourselves (no symbol_table configured).
@@ -412,6 +412,12 @@ class TaintTracker:
                 for arg in fnctx.args:
                     if arg != "self":
                         tainted_vars.add(arg)
+
+            # FastAPI Depends() injection: treat Depends parameters as tainted sources
+            if isinstance(fnctx.meta, dict):
+                for dep in fnctx.meta.get("source_params", []) or []:
+                    if dep != "self":
+                        tainted_vars.add(dep)
 
             self._analyze_function(
                 fnctx=fnctx,
@@ -947,7 +953,8 @@ class TaintTracker:
                     if (
                         sink_name
                         and not self._matches_any(sink_name, self.sinks)
-                        and len(callstack) < (self._ip.max_depth if self._ip is not None else 3)
+                        and len(callstack)
+                        < (self._ip.max_depth if self._ip is not None else 3)
                     ):
                         # Only bother if at least one arg is tainted
                         if self._call_has_tainted_arg(
@@ -962,7 +969,11 @@ class TaintTracker:
                                         node, caller_file=self._current_file
                                     )
                                 # Fallback: resolve via import_map directly
-                                if sym is None and self._import_map and self.symbol_table is not None:
+                                if (
+                                    sym is None
+                                    and self._import_map
+                                    and self.symbol_table is not None
+                                ):
                                     qualname = self._import_map.get(sink_name)
                                     if qualname is None and "." in sink_name:
                                         head, rest = sink_name.split(".", 1)

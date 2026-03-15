@@ -63,6 +63,9 @@ class PyASTParser:
 
         functions: Dict[str, Any] = {}
 
+        # Pre-scan import aliases so we can resolve Depends / alias usage.
+        import_map = self._extract_import_aliases(self.tree)
+
         # Note: bandit uses an ast.NodeVisitor with node-specific hooks.
         # Here we keep things minimal, but avoid repeated ast.walk() where possible.
         for node in ast.walk(self.tree):
@@ -78,12 +81,15 @@ class PyASTParser:
             args.extend([a.arg for a in node.args.args])
             args.extend([a.arg for a in node.args.kwonlyargs])
 
+            source_params = self._extract_source_params(node, import_map)
+
             functions[node.name] = {
                 "body": node.body,
                 "args": args,
                 "decorators": decorators,
                 "routes": routes,
                 "calls": calls,
+                "source_params": source_params,
             }
 
         return functions
@@ -169,6 +175,104 @@ class PyASTParser:
             routes.append(info)
 
         return decorator_names, routes
+
+    def _extract_source_params(
+        self,
+        func_node: ast.AST,
+        import_map: Optional[Dict[str, str]] = None,
+    ) -> List[str]:
+        """Extract parameters that should be treated as tainted sources.
+
+        Currently focuses on FastAPI-style dependency injection:
+          def endpoint(
+              user_id: str,
+              user=Depends(get_user),
+              token: str = Depends(auth),
+          )
+
+        We treat the *parameter name* as a taint source when its default
+        value is a call to fastapi.Depends / starlette.Depends (directly or
+        via imported alias).
+        """
+        if not isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return []
+
+        args = func_node.args
+        params = list(getattr(args, "posonlyargs", [])) + list(args.args)
+        defaults = list(args.defaults or [])
+        if not defaults:
+            return []
+
+        pad = len(params) - len(defaults)
+        if pad < 0:
+            pad = 0
+        defaults = [None] * pad + defaults
+
+        out: List[str] = []
+        for param, default in zip(params, defaults):
+            if default is None:
+                continue
+            if self._is_depends_call(default, import_map):
+                out.append(param.arg)
+
+        # keyword-only parameters
+        kwonlyargs = list(args.kwonlyargs)
+        kw_defaults = list(args.kw_defaults or [])
+        for param, default in zip(kwonlyargs, kw_defaults):
+            if default is None:
+                continue
+            if self._is_depends_call(default, import_map):
+                out.append(param.arg)
+
+        return out
+
+    def _is_depends_call(
+        self,
+        node: ast.AST,
+        import_map: Optional[Dict[str, str]] = None,
+    ) -> bool:
+        """Return True if node looks like a Depends(...) call."""
+        if not isinstance(node, ast.Call):
+            return False
+        fn_name = self._get_full_name(node.func)
+        if not fn_name:
+            return False
+
+        if fn_name == "Depends" or fn_name.endswith(".Depends"):
+            return True
+
+        # Resolve aliases when possible (e.g. Dep -> fastapi.Depends)
+        if import_map and fn_name in import_map:
+            mapped = import_map.get(fn_name, "")
+            if mapped.endswith(".Depends") or mapped == "Depends":
+                return True
+
+        return False
+
+    def _extract_import_aliases(self, tree: ast.AST) -> Dict[str, str]:
+        """Extract import aliases from a module AST.
+
+        Returns mapping: local_name -> fully-qualified module/name.
+        Examples:
+            from fastapi import Depends as Dep  -> {"Dep": "fastapi.Depends"}
+            from fastapi import Depends        -> {"Depends": "fastapi.Depends"}
+            import fastapi as fa               -> {"fa": "fastapi"}
+        """
+        out: Dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    local = alias.asname or alias.name.split(".")[-1]
+                    out[local] = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    local = alias.asname or alias.name
+                    full = f"{mod}.{alias.name}" if mod else alias.name
+                    out[local] = full
+        return out
 
     def _get_full_name(self, node: ast.AST) -> str:
         """Resolve a node into a dotted name when possible."""
