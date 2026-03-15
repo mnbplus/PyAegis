@@ -139,3 +139,28 @@
 - 待实施深度优化方向：TaintTracker Visitor 模式重构、Type Hints 类型推导、增量扫描（git diff）、Benchmark CI（靶场 + Precision/Recall）
 - 待补充：docs/usage.md 实质内容、demo.gif 真实录屏
 
+
+## 2026-03-16 00:41
+
+### 完成内容
+- aegis-incremental: git-diff 增量扫描 (pyaegis/core/incremental.py)，--incremental/--base-ref CLI 参数，11测试全通过，commit 1cd29f2（本地已提交，待push）
+- aegis-next (2af0e238): --ruleset/--list-rulesets CLI 支持，commit ff15847 已push
+- aegis-gtm (724436d3): README 产品定位重写 + action.yml + docs/github-action.md，commit 250829c 已push
+- aegis-refactor (9c4d5006): 框架感知解耦为 pyaegis/frameworks/ 插件包，commit d93683a 已push
+- aegis-homepage-polish (afa9bdc0): README 6项优化，commit e83747e 已push
+- 历史积累: SARIF CWE映射扩充、interprocedural call graph、Python headless API
+
+### 进行中
+- aegis-api (4f988e99): Python headless API + LangChain tool，11/11测试通过，正在执行最终commit
+- aegis-benchmark (e2761cbb): label存在但messages为空，疑似未实际启动
+
+### 遇到的问题
+- aegis-incremental commit 1cd29f2 本地完成但未push，远端不含此提交
+- aegis-benchmark session 无消息记录，可能空spawn
+- pre-commit black 多次拦截commit，各agent均需 git add 后重试
+
+### 下一步
+- 等 aegis-api 完成后确认所有本地commit已push
+- 补充 docs/usage.md 内容
+- demo.gif 真实录屏（asciinema + agg）
+- Benchmark CI：靶场 submodule + Precision/Recall 自动输出
