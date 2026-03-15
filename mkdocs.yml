@@ -1,0 +1,26 @@
+site_name: PyAegis Documentation
+site_description: Advanced Python Static Application Security Testing (SAST) Engine
+site_author: PyAegis Team
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+  features:
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Usage Example: usage.md
+  - Architecture: architecture.md
+  - Writing Rules: rules.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences

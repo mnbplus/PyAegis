@@ -1,3 +1,25 @@
+Metadata-Version: 2.4
+Name: pyaegis
+Version: 0.1.0
+Summary: Advanced Python Static Application Security Testing (SAST) Engine
+Author-email: Open Source Community <maintainers@pyaegis.dev>
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Security
+Classifier: Topic :: Software Development :: Quality Assurance
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pyyaml>=6.0.1
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: black>=23.9.1; extra == "dev"
+Requires-Dist: flake8>=6.1.0; extra == "dev"
+Requires-Dist: pre-commit>=3.4.0; extra == "dev"
+Dynamic: license-file
+
 <div align="center">
   <img src="https://raw.githubusercontent.com/PyAegis/PyAegis/main/docs/logo.png" alt="PyAegis Logo" width="300"/>
   <h1>🛡️ PyAegis</h1>

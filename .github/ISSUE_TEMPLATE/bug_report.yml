@@ -1,0 +1,37 @@
+name: Bug Report
+description: Create a report to help us improve PyAegis
+title: "[BUG] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us, what did you expect to happen?
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+  - type: textarea
+    id: code-snippet
+    attributes:
+      label: Vulnerable Code Snippet (Optional)
+      description: Provide the Python code that PyAegis failed to parse or analyze correctly.
+      render: python
+  - type: input
+    id: version
+    attributes:
+      label: PyAegis Version
+      description: What version of PyAegis are you running? (e.g., `pyaegis --version` or `pip show pyaegis`)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: e.g., Ubuntu 22.04, Windows 11, macOS 14
+    validations:
+      required: true

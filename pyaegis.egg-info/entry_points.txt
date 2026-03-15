@@ -1,0 +1,2 @@
+[console_scripts]
+pyaegis = pyaegis.cli:main
