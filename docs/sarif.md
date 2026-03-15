@@ -265,4 +265,4 @@ sarif ls pyaegis.sarif
 
 - Rule descriptors under `runs[].tool.driver.rules` are included for built-in rule IDs. For unknown rule IDs, PyAegis falls back to a generic descriptor.
 - `artifactLocation.uri` uses the path as provided to the scanner; relative paths are recommended for portability.
-- `region.snippet` is not currently emitted; snippets are planned.
+- `region.snippet` is emitted when the source file is available; otherwise it is omitted.

@@ -4,8 +4,6 @@ from pyaegis.models import Finding, ScanResult
 from pyaegis.reporters import (
     TextReporter,
     JSONReporter,
-    CSVReporter,
-    HTMLReporter,
     SARIFReporter,
 )
 
@@ -60,10 +58,29 @@ def test_json_reporter_structure():
     assert data["findings"][0]["rule_id"] == "PYA-103"
 
 
-def test_sarif_reporter_structure():
+def test_sarif_reporter_structure(tmp_path):
+    p = tmp_path / "app.py"
+    p.write_text("print('hi')\n", encoding="utf-8")
+
     buf = io.StringIO()
     reporter = SARIFReporter(buf)
-    reporter.report(_make_result())
+    reporter.report(
+        ScanResult(
+            total_files=1,
+            findings=[
+                Finding(
+                    rule_id="PYA-103",
+                    description="OS command injection.",
+                    file_path=str(p),
+                    line_number=1,
+                    sink_context="handler",
+                    severity="CRITICAL",
+                    source_var="user_input",
+                )
+            ],
+            duration_seconds=0.1,
+        )
+    )
     data = json.loads(buf.getvalue())
     assert data["version"] == "2.1.0"
     assert len(data["runs"]) == 1
@@ -71,3 +88,5 @@ def test_sarif_reporter_structure():
     assert len(results) == 1
     assert results[0]["ruleId"] == "PYA-103"
     assert results[0]["level"] == "error"
+    region = results[0]["locations"][0]["physicalLocation"]["region"]
+    assert region["snippet"]["text"] == "print('hi')"

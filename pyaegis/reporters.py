@@ -151,6 +151,24 @@ def _read_context(file_path: str, line_number: int, radius: int = 2) -> Optional
     return "".join(out)
 
 
+def _read_snippet(file_path: str, line_number: int) -> Optional[str]:
+    """Read a single-line snippet for SARIF output."""
+    if not file_path or line_number <= 0:
+        return None
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return None
+
+    idx = line_number - 1
+    if idx < 0 or idx >= len(lines):
+        return None
+
+    return lines[idx].rstrip("\n")
+
+
 class TextReporter:
     """Human-readable console output."""
 
@@ -657,6 +675,8 @@ class SARIFReporter:
             "artifactChanges": [],
         }
 
+        snippet = _read_snippet(finding.file_path, finding.line_number)
+
         result: Dict[str, Any] = {
             "ruleId": finding.rule_id,
             "level": level,
@@ -683,6 +703,7 @@ class SARIFReporter:
                         "region": {
                             "startLine": finding.line_number,
                             "startColumn": 1,
+                            "snippet": {"text": snippet} if snippet else None,
                         },
                     },
                     "logicalLocations": [
@@ -704,6 +725,8 @@ class SARIFReporter:
                 "cwe": meta["cwe"],
             },
         }
+        if result["locations"][0]["physicalLocation"]["region"]["snippet"] is None:
+            result["locations"][0]["physicalLocation"]["region"].pop("snippet")
         return result
 
 
