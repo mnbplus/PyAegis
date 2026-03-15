@@ -35,7 +35,6 @@ from pyaegis.reporters import (
 )
 from pyaegis.rules_catalog import RULES, format_explain
 
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -524,19 +523,29 @@ def _cmd_init(force: bool) -> int:
     return 0
 
 
-def _run_taint_scan(
-    target: str,
+def _run_taint_scan_files(
+    py_files: list[str],
     rules_path: str,
+    *,
     workers: int = 1,
     timeout: Optional[float] = None,
     show_progress: bool = False,
+    symbol_table=None,
 ) -> tuple[list, list]:
-    """Shared scan logic used by both `scan` and `fix` commands.
+    """Run taint scan on an explicit list of python files.
 
     Returns (py_files, findings).
-    """
-    py_files = [target] if os.path.isfile(target) else _find_python_files(target)
 
+    Args:
+        py_files: Explicit list of .py files to scan.
+        rules_path: YAML rules file path.
+        workers: Parser worker processes.
+        timeout: Per-file parse timeout.
+        show_progress: Show progress bar.
+        symbol_table: Optional GlobalSymbolTable to use for inter-procedural
+            analysis. When omitted, uses the symbol table built from the parsed
+            files.
+    """
     rules: dict = {}
     if os.path.exists(rules_path):
         rules = _load_yaml(rules_path)
@@ -556,13 +565,15 @@ def _run_taint_scan(
     except (TypeError, ValueError):
         max_call_depth = 3
 
+    st = symbol_table if symbol_table is not None else proj_parser.symbol_table
+
     tracker = TaintTracker(
         sources=rules.get("inputs", []),
         sinks=rules.get("sinks", []),
         sanitizers=rules.get("sanitizers", []),
         conditional_sinks=rules.get("conditional_sinks", []),
         source_decorators=rules.get("source_decorators", []),
-        symbol_table=proj_parser.symbol_table,
+        symbol_table=st,
         max_call_depth=max_call_depth,
     )
     for filepath, cfg in cfgs.items():
@@ -570,6 +581,27 @@ def _run_taint_scan(
             tracker.analyze_cfg(cfg, filepath)
 
     return py_files, tracker.get_findings()
+
+
+def _run_taint_scan(
+    target: str,
+    rules_path: str,
+    workers: int = 1,
+    timeout: Optional[float] = None,
+    show_progress: bool = False,
+) -> tuple[list, list]:
+    """Shared scan logic used by both `scan` and `fix` commands.
+
+    Returns (py_files, findings).
+    """
+    py_files = [target] if os.path.isfile(target) else _find_python_files(target)
+    return _run_taint_scan_files(
+        py_files,
+        rules_path,
+        workers=workers,
+        timeout=timeout,
+        show_progress=show_progress,
+    )
 
 
 def _scan(args: argparse.Namespace) -> int:
@@ -646,34 +678,60 @@ def _scan(args: argparse.Namespace) -> int:
         changed = get_changed_files(base_ref=base_ref, repo_path=repo_root)
         if not changed:
             if not args.quiet:
-                sys.stdout.write("[incremental] No changed Python files detected — nothing to scan.\n")
+                sys.stdout.write(
+                    "[incremental] No changed Python files detected — nothing to scan.\n"
+                )
             return 0
+
+        # Build a lightweight global symbol table for dependency expansion.
+        # We avoid parsing the whole repo with ParallelProjectParser here because
+        # real-world repos may include broken/experimental .py files (syntax errors),
+        # and incremental mode should be best-effort.
+        all_repo_py_files = _find_python_files(repo_root)
+        try:
+            from pyaegis.core.call_graph import GlobalSymbolTable
+
+            symbol_table = GlobalSymbolTable.build(
+                all_repo_py_files, root_dir=repo_root
+            )
+        except Exception:
+            symbol_table = None
+
+        affected = sorted(
+            get_affected_files(changed, symbol_table, repo_path=repo_root)
+        )
+
         if not args.quiet:
             logger.info(
-                "[incremental] Scanning %d changed file(s) (base: %s)",
+                "[incremental] Scanning %d changed file(s) + %d dependent file(s) (base: %s)",
                 len(changed),
+                max(0, len(affected) - len(changed)),
                 base_ref,
             )
-        # Override target to the list of changed files by scanning them one-by-one.
-        # We reuse _run_taint_scan per-file and aggregate.
+
+        # Scan best-effort per-file to skip parse errors (matches previous behaviour).
         all_py_files: list[str] = []
         all_findings: list = []
-        for _f in changed:
+        for _f in affected:
             try:
-                _pf, _fi = _run_taint_scan(
-                    _f,
+                _pf, _fi = _run_taint_scan_files(
+                    [_f],
                     rules_path,
                     workers=1,
                     timeout=timeout,
                     show_progress=False,
+                    symbol_table=symbol_table,
                 )
                 all_py_files.extend(_pf)
                 all_findings.extend(_fi)
             except ParserError as e:
                 logger.warning("[incremental] Skipping %s: %s", _f, e)
+
         duration = time.time() - start_time
         if sev_allow is not None:
-            all_findings = [f for f in all_findings if (f.severity or "").upper() in sev_allow]
+            all_findings = [
+                f for f in all_findings if (f.severity or "").upper() in sev_allow
+            ]
         scan_result = ScanResult(
             total_files=len(all_py_files),
             findings=all_findings,
