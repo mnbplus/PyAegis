@@ -4,6 +4,7 @@ import logging
 import multiprocessing
 import os
 import pickle
+import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple

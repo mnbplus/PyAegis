@@ -1,0 +1,58 @@
+[English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+
+<div align="center">
+
+```
+ ██████╗ ██╗   ██╗ █████╗ ███████╗ ██████╗ ██╗███████╗
+ ██╔══██╗╚██╗ ██╔╝██╔══██╗██╔════╝██╔════╝ ██║██╔════╝
+ ██████╔╝ ╚████╔╝ ███████║█████╗  ██║  ███╗██║███████╗
+ ██╔═══╝   ╚██╔╝  ██╔══██║██╔══╝  ██║   ██║██║╚════██║
+ ██║        ██║   ██║  ██║███████╗╚██████╔╝██║███████║
+ ╚═╝        ╚═╝   ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝╚══════╝
+```
+
+**The next-generation Static Application Security Testing (SAST) engine for Python.**
+
+<p>
+  <a href="https://pypi.org/project/pyaegis"><img alt="PyPI" src="https://img.shields.io/pypi/v/pyaegis?style=for-the-badge&logo=pypi&logoColor=white"></a>
+  <a href="https://python.org"><img alt="Python" src="https://img.shields.io/badge/Python-3.8%20|%203.9%20|%203.10%20|%203.11%20|%203.12-blue.svg?style=for-the-badge&logo=python"></a>
+  <a href="https://github.com/mnbplus/PyAegis/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/mnbplus/PyAegis/ci.yml?branch=main&style=for-the-badge&logo=github"></a>
+  <a href="https://codecov.io/gh/mnbplus/PyAegis"><img alt="Coverage" src="https://img.shields.io/codecov/c/github/mnbplus/PyAegis?style=for-the-badge&logo=codecov"></a>
+  <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge"></a>
+  <a href="https://github.com/psf/black"><img alt="Code Style" src="https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge"></a>
+  <img alt="Powered by PyAegis" src="https://img.shields.io/badge/security-powered%20by%20PyAegis-blueviolet?style=for-the-badge&logo=shield">
+</p>
+
+<p>
+  <a href="README.md">English</a> ·
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="README.ja.md">日本語</a>
+</p>
+
+</div>
+
+---
+
+> **Lightning-fast. Data-flow aware. Built for modern CI/CD.**
+
+**PyAegis** は Python ファーストの SAST ツールです。単純な正規表現マッチングを超え、コードを AST にパースして軽量な制御フローモデルを構築し、**taint-style source → sink analysis** を実行することで、疑わしいパターンを列挙するだけではなく、実際に成立しうるインジェクション経路を特定します。
+
+---
+
+## Table of Contents
+
+- [How it works（仕組み）](#how-it-works)
+- [Detects（検出する脆弱性）](#detects)
+- [Quick Start（クイックスタート）](#quick-start)
+- [Live Example（実例）](#live-example)
+- [False Positive Rate（誤検知率）](#false-positive-rate)
+- [Usage（使い方）](#usage)
+- [Writing Custom Rules（カスタムルールの作成）](#writing-custom-rules)
+- [CI/CD Integration（CI/CD 統合）](#cicd-integration)
+- [Comparison（比較）](#comparison-with-other-tools)
+- [Roadmap（ロードマップ）](#roadmap)
+- [Contributing（コントリビューション）](#contributing)
+- [Show Your Style（バッジを使う）](#show-your-style)
+
+---
+

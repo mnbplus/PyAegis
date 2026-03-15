@@ -1,59 +1,31 @@
-import textwrap
-
-from pyaegis.core.parser import ParallelProjectParser
-from pyaegis.core.taint import TaintTracker
+﻿import ast
+from pyaegis.core.call_graph import GlobalSymbolTable, InterproceduralAnalyzer
 
 
-def test_interprocedural_propagates_internal_source_return(tmp_path):
-    """If a resolved callee returns a source expression (e.g. input()),
-    the call result should be treated as tainted even when the call has no args.
+def test_symbol_table_registers_functions():
+    code = 'def foo(x, y): pass\ndef bar(z): pass'
+    tree = ast.parse(code)
+    st = GlobalSymbolTable()
+    st.register_file('test_module.py', tree)
+    assert 'test_module.foo' in st.functions
+    assert 'test_module.bar' in st.functions
 
-    This exercises the inter-procedural return-taint computation across modules.
-    """
 
-    a = tmp_path / "mod_a.py"
-    b = tmp_path / "mod_b.py"
+def test_symbol_table_registers_imports():
+    code = 'from mymodule import helper'
+    tree = ast.parse(code)
+    st = GlobalSymbolTable()
+    st.register_file('app.py', tree)
+    assert 'helper' in st.imports['app.py']
 
-    a.write_text(
-        textwrap.dedent(
-            """
-            def get_cmd():
-                return input()
-            """
-        ).lstrip("\n"),
-        encoding="utf-8",
-    )
 
-    b.write_text(
-        textwrap.dedent(
-            """
-            import os
-            from mod_a import get_cmd
-
-            def endpoint():
-                cmd = get_cmd()
-                os.system(cmd)
-            """
-        ).lstrip("\n"),
-        encoding="utf-8",
-    )
-
-    parser = ParallelProjectParser(pool_size=1)
-    cfgs = parser.parse_all([str(a), str(b)], show_progress=False)
-
-    assert (
-        parser.symbol_table is not None
-    ), "symbol_table should be built for inter-procedural taint"
-
-    tracker = TaintTracker(
-        sources=["input"],
-        sinks=["os.system"],
-        symbol_table=parser.symbol_table,
-        max_call_depth=5,
-    )
-
-    for fp, cfg in cfgs.items():
-        tracker.analyze_cfg(cfg, filepath=fp)
-
-    findings = tracker.get_findings()
-    assert any(f.sink_name == "os.system" for f in findings)
+def test_interprocedural_basic():
+    code_a = 'import os\ndef process(user_data):\n    os.system(user_data)'
+    code_b = 'from a import process\ndef handler(req):\n    process(req)'
+    st = GlobalSymbolTable()
+    st.register_file('a.py', ast.parse(code_a))
+    st.register_file('b.py', ast.parse(code_b))
+    analyzer = InterproceduralAnalyzer(st)
+    # process() called with tainted arg at index 0
+    result = analyzer.has_tainted_sink('b.py', 'process', [0])
+    assert result  # should detect taint reaching os.system

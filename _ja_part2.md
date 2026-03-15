@@ -1,0 +1,124 @@
+## How it works
+
+```
+  .py files
+      │
+      ▼
+  ┌─────────────┐      ┌──────────────────┐      ┌─────────────────┐
+  │  AST Parser │ ───▶ │  Taint Tracker   │ ───▶ │   Reporter      │
+  │ (parallel)  │      │ source → sink    │      │ text/json/sarif │
+  └─────────────┘      └──────────────────┘      └─────────────────┘
+        │                      │
+        │                      ├── propagates through assignments
+        │                      ├── follows f-strings & concatenation
+        │                      ├── tracks across local function calls
+        │                      └── stops at known sanitizers
+        │
+        └── multiprocessing pool for large repos
+```
+
+1. **Collect** — 対象パス配下のすべての `.py` ファイルを検出します。
+2. **Parse** — 各ファイルの AST を並列で構築します。
+3. **Model** — 関数ごとの本体、引数、コールグラフを抽出します。
+4. **Taint** — ソースをシードとして関数内へ伝播させ、taint がシンクに到達した時点で検出します。
+5. **Report** — 検出結果を `text` / `json` / `csv` / `html` / `sarif` 形式で出力します。
+
+---
+
+## Detects
+
+PyAegis には、Python で最も重要度の高い脆弱性クラスを網羅した包括的なデフォルトルールセットが同梱されています。
+
+### Code Injection
+| Sink | Risk | Example |
+|------|------|---------|
+| `eval()` | Critical | 任意コード実行 |
+| `exec()` | Critical | 任意コード実行 |
+| `compile()` | Critical | 動的コードコンパイル |
+| `runpy.run_module()` | Critical | 動的モジュール実行 |
+| `runpy.run_path()` | Critical | 動的パス実行 |
+
+### OS Command Injection
+| Sink | Risk | Example |
+|------|------|---------|
+| `os.system()` | Critical | シェルコマンドインジェクション |
+| `os.popen()` | Critical | シェルコマンドインジェクション |
+| `subprocess.call()` | Critical | プロセスインジェクション |
+| `subprocess.run()` | Critical | プロセスインジェクション |
+| `subprocess.Popen()` | Critical | プロセスインジェクション |
+| `os.spawn*` | Critical | プロセス起動 |
+
+### Insecure Deserialization
+| Sink | Risk | Example |
+|------|------|---------|
+| `pickle.loads()` | Critical | 任意オブジェクトのインスタンス化 |
+| `pickle.load()` | Critical | 任意オブジェクトのインスタンス化 |
+| `dill.loads()` | Critical | 任意オブジェクトのインスタンス化 |
+| `marshal.loads()` | Critical | バイトコードのデシリアライゼーション |
+| `yaml.load()` | High | 任意 Python コードの実行 |
+| `yaml.unsafe_load()` | Critical | 任意 Python コードの実行 |
+| `jsonpickle.decode()` | Critical | 任意オブジェクトのインスタンス化 |
+
+### Server-Side Request Forgery (SSRF)
+| Sink | Risk | Example |
+|------|------|---------|
+| `requests.get/post/request()` | High | 内部サービスへの SSRF |
+| `httpx.get/post/request()` | High | 内部サービスへの SSRF |
+| `urllib.request.urlopen()` | High | SSRF |
+| `aiohttp.ClientSession.*()` | High | 非同期 SSRF |
+| `socket.create_connection()` | High | ローソケット SSRF |
+
+### Path Traversal / Unsafe File Operations
+| Sink | Risk | Example |
+|------|------|---------|
+| `open()` | High | 任意ファイルの読み書き |
+| `pathlib.Path()` | High | パストラバーサル |
+| `shutil.copy/move/rmtree()` | High | 任意ファイル操作 |
+| `os.remove/unlink/rmdir()` | High | 任意ファイル削除 |
+| `tempfile.NamedTemporaryFile()` | Medium | 推測可能な一時パス |
+
+### SQL Injection
+| Sink | Risk | Example |
+|------|------|---------|
+| `sqlite3.Cursor.execute()` | Critical | SQL インジェクション |
+| `psycopg2.cursor.execute()` | Critical | SQL インジェクション |
+| `pymysql.connect()` | High | SQL インジェクション |
+| `MySQLdb.connect()` | High | SQL インジェクション |
+| `sqlalchemy.text()` | High | 生 SQL インジェクション |
+
+### Template Injection (SSTI)
+| Sink | Risk | Example |
+|------|------|---------|
+| `jinja2.Template()` | Critical | サーバーサイドテンプレートインジェクション |
+| `jinja2.Environment.from_string()` | Critical | SSTI |
+| `mako.template.Template()` | Critical | SSTI |
+
+### XML / XXE
+| Sink | Risk | Example |
+|------|------|---------|
+| `xml.etree.ElementTree.parse()` | High | XXE エンティティ展開 |
+| `xml.etree.ElementTree.fromstring()` | High | XXE |
+| `lxml.etree.parse()` | High | XXE |
+| `xml.dom.minidom.parse()` | High | XXE |
+
+### ReDoS
+| Sink | Risk | Example |
+|------|------|---------|
+| `re.compile()` | Medium | 正規表現サービス拒否 |
+| `re.match/search()` | Medium | 正規表現サービス拒否 |
+
+**Tracked Sources:**
+
+| Category | Examples |
+|----------|----------|
+| Builtins | `input()`, `sys.argv` |
+| Environment | `os.getenv()`, `os.environ.get()` |
+| Flask/Werkzeug | `request.args`, `request.form`, `request.json`, `request.cookies`, `request.headers`, `request.files` |
+| Django | `request.GET`, `request.POST`, `request.COOKIES`, `request.body`, `request.META` |
+| FastAPI/Starlette | `request.query_params`, `request.path_params`, `request.form`, `request.body` |
+| Parsing | `json.loads()`, `ujson.loads()`, `xmltodict.parse()` |
+
+**Known Sanitizers** (stop taint propagation): `html.escape`, `markupsafe.escape`, `bleach.clean`, `django.utils.html.escape`, `os.path.abspath`, `os.path.normpath`, `pathlib.Path.resolve`, `urllib.parse.urlparse`
+
+---
+
