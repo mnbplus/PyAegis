@@ -125,6 +125,60 @@ def _is_test_filepath(filepath: str) -> bool:
     return False
 
 
+def _primary_arg_for_type(call_node: ast.Call) -> Optional[ast.AST]:
+    """Best-effort: pick the primary argument that represents user-controlled payload.
+
+    For most sinks (e.g. eval(x), subprocess.run(cmd), open(path)), this is the
+    first positional arg. Some APIs also accept keyword forms.
+    """
+    if call_node.args:
+        return call_node.args[0]
+
+    for kw in call_node.keywords:
+        if kw.arg in {"args", "command", "cmd", "path", "filename"}:
+            return kw.value
+
+    return None
+
+
+def _expr_is_string(expr: ast.AST) -> bool:
+    """Heuristic string-typed expression check.
+
+    We intentionally only *exclude* obvious non-string container literals.
+    For unknown expressions (e.g. Name), we return True to avoid introducing
+    false negatives when type information is unavailable.
+    """
+    if isinstance(expr, ast.Constant):
+        return isinstance(expr.value, str)
+
+    # f-string
+    if isinstance(expr, ast.JoinedStr):
+        return True
+
+    # string concat / old-style formatting
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Add, ast.Mod)):
+        return _expr_is_string(expr.left) or _expr_is_string(expr.right)
+
+    # Obvious containers / comprehensions are not strings
+    if isinstance(
+        expr,
+        (
+            ast.List,
+            ast.Tuple,
+            ast.Set,
+            ast.Dict,
+            ast.ListComp,
+            ast.SetComp,
+            ast.DictComp,
+            ast.GeneratorExp,
+        ),
+    ):
+        return False
+
+    # Unknown: assume string-ish (avoid suppressing true positives)
+    return True
+
+
 def _check_conditional_sink(
     sink_name: str,
     call_node: ast.Call,
@@ -163,6 +217,15 @@ def _check_conditional_sink(
                         break
             if "not_in_test_file" in cond:
                 if cond["not_in_test_file"] and _is_test_filepath(filepath):
+                    all_pass = False
+            if "arg_type" in cond:
+                want = str(cond.get("arg_type", "")).strip().lower()
+                if want == "string":
+                    primary = _primary_arg_for_type(call_node)
+                    if primary is None or not _expr_is_string(primary):
+                        all_pass = False
+                else:
+                    # Unknown arg_type values are treated as non-match
                     all_pass = False
             if not all_pass:
                 break

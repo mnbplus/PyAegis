@@ -1,3 +1,30 @@
+﻿## 2026-03-15 22:25 (Asia/Shanghai)
+
+### 完成内容
+- 跨文件污点追踪 import_map resolution 落地：`from utils import get_cmd` → `os.system(cmd)` 链路打通，101 passed / 4 skipped，零回归
+- `_build_import_map()` 支持三种 import 形式（from x import y / import x as y / dotted call）
+- commit `aadea4e`: feat(p0): connect inter-procedural taint via import_map resolution
+- `aegis-next`（881abf4b）正在实施 conditional_sinks `arg_type: string` 条件扩展
+- GitHub 最新 5 commits（截至 2026-03-15T13:57Z）：
+  - `6919906` docs: add complete Japanese README translation
+  - `9c1e48a` docs: add complete Japanese README
+  - `d490239` chore: remove remaining stray temp files
+  - `3fa3cfe` chore: remove stray patch scripts from root
+  - `8c57686` feat(p0): GlobalSymbolTable.build() with root_dir, 95 passing
+
+### 遇到问题
+- hajimi 三个 key claude-sonnet-4-6 同时 429，aegis-interprocedural-v2 和 aegis-llm-remediation 中途挂掉，任务未完成
+- hajimi-plus-3 出现 503，部分轮次临时用 deepseek reasoner / glm-5-thinking 顶替
+- 两个 aegis-next 实例（1139f019 / 881abf4b）同时运行，存在并发写 taint.py 竞态风险
+
+### 下一步
+- conditional_sinks arg_type:string 完成后确认 pytest 全绿
+- ROADMAP P1：框架感知 Source 自动发现（Django request / FastAPI Depends）
+- LLM 修复建议模块（aegis-llm-remediation）待重启
+- 限速期间优先用 hajimicodex / hajimigpt52 交错，避免集体 429
+
+---
+
 # PyAegis 进度日志
 
 ---
@@ -70,3 +97,23 @@
 - 等待 aegis-next (1139f019) 完成当前扫描验证，继续推进 ROADMAP P1 剩余项（框架感知 Source 自动发现）
 - 考虑在 claude 限速期间优先用 codex/gpt-5.2 跑 agent，避免卡住
 - P2 conditional_sinks 规则引擎已有基础，可开始强化测试覆盖
+
+
+## 2026-03-15 22:30 (Asia/Shanghai)
+
+**完成内容：**
+- P0 跨文件污点追踪 import_map resolution 完整落地，commit aadea4e 已 push
+- 覆盖三种 import 形式：from x import y / import x as y / dotted call
+- 日文 README 翻译完成并 push，commit 6919906
+- 101 passed / 4 skipped，零回归
+- Django raw sink 规则补全，parser 支持 async def
+
+**遇到问题：**
+- hajimi-plus claude-sonnet-4-6 集体 429 限速，aegis-interprocedural-v2 和 aegis-llm-remediation 中途挂掉
+- 多个 aegis-next 实例并发写 taint.py，存在竞态风险
+- hajimi-plus-3 出现 503 No available channel
+
+**下一步：**
+- conditional_sinks 强化完成后验证 pytest 全绿
+- P1 框架感知 Source 自动发现继续推进
+- 关注并发 agent 是否产生 git 冲突

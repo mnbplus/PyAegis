@@ -10,6 +10,8 @@
 # conditional_sinks: structured sink definitions with optional conditions.
 #   conditions.has_kwarg  : only trigger when call has a specific kwarg=value
 #   conditions.not_in_test_file: skip if file path looks like a test file
+#   conditions.arg_type: only trigger when the primary call argument looks like that type
+#     - string: string literal / f-string / string operation (containers like list/tuple excluded)
 
 # Optional: inter-procedural analysis depth when a global symbol table is available.
 # Higher values can catch longer cross-module chains but may increase runtime.
@@ -117,13 +119,15 @@ sinks:
 # A conditional sink listed here SHADOWS the matching unconditional entry above.
 conditional_sinks:
   # subprocess.run(cmd, shell=False) is SAFE — only flag shell=True
+  # Additionally, only flag when the primary arg is string-like.
+  # This avoids false positives for `subprocess.run(['ls', '-la'], shell=True)`.
   - name: subprocess.run
     severity: CRITICAL
     rule_id: PYA-001
     vuln_type: command_injection
     conditions:
-      - has_kwarg:
-          shell: true
+      - has_kwarg: {shell: true}
+      - arg_type: string
 
   # subprocess.call with shell=True only
   - name: subprocess.call

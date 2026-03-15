@@ -22,7 +22,7 @@ import yaml
 from pyaegis.core.parser import ParallelProjectParser
 from pyaegis.core.taint import TaintTracker
 from pyaegis.exceptions import ParserError
-from pyaegis.fixers import RemediationEngine
+from pyaegis.fixers import RemediationEngine, LLMRemediationEngine
 from pyaegis.models import ScanResult
 from pyaegis.reporters import (
     CSVReporter,
@@ -197,6 +197,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Shortcut to a bundled ruleset name (e.g. xxe, ssrf, deserialization).",
     )
+    p_scan.add_argument(
+        "--format",
+        default="text",
+        choices=["text", "json", "sarif", "csv", "html"],
+        help="Output format (text, json, sarif, csv, html).",
+    )
     p_scan.add_argument("--output", default=None, help="Output file path.")
     p_scan.add_argument(
         "--workers",
@@ -268,6 +274,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-color",
         action="store_true",
         help="Disable coloured output.",
+    )
+    p_remediate.add_argument(
+        "--llm",
+        action="store_true",
+        help="Enable LLM-powered fix generation (requires PYAEGIS_LLM_KEY env var).",
+    )
+    p_remediate.add_argument(
+        "--llm-model",
+        default="deepseek-chat",
+        help="LLM model name (default: deepseek-chat).",
+    )
+    p_remediate.add_argument(
+        "--llm-base-url",
+        default="https://api.deepseek.com/v1",
+        help="LLM API base URL (default: https://api.deepseek.com/v1).",
+    )
+    p_remediate.add_argument(
+        "--apply",
+        action="store_true",
+        help="Automatically apply generated diffs to source files.",
     )
 
     # --- fix ---
@@ -562,6 +588,30 @@ def _cmd_remediate(args: argparse.Namespace) -> int:
         sys.stdout.write(f"No vulnerabilities found in {target}.\n")
         return 0
 
+    # --- LLM mode setup ---
+    use_llm = getattr(args, "llm", False)
+    llm_engine: Optional[LLMRemediationEngine] = None
+    if use_llm:
+        api_key = os.environ.get("PYAEGIS_LLM_KEY", "")
+        if not api_key:
+            sys.stderr.write(
+                "remediate --llm: PYAEGIS_LLM_KEY environment variable is not set.\n"
+            )
+            return 2
+        llm_model = getattr(args, "llm_model", "deepseek-chat") or "deepseek-chat"
+        llm_base_url = (
+            getattr(args, "llm_base_url", "https://api.deepseek.com/v1")
+            or "https://api.deepseek.com/v1"
+        )
+        try:
+            llm_engine = LLMRemediationEngine(
+                api_key=api_key, model=llm_model, base_url=llm_base_url
+            )
+        except ImportError as exc:
+            sys.stderr.write(f"remediate --llm: {exc}\n")
+            return 2
+
+    apply_flag = getattr(args, "apply", False)
     engine = RemediationEngine()
     w = sys.stdout.write
     w("=" * 64 + "\n")
@@ -579,6 +629,34 @@ def _cmd_remediate(args: argparse.Namespace) -> int:
         w("  Example (after):\n")
         for ln in rem.example_after.splitlines():
             w(f"    {ln}\n")
+
+        if llm_engine is not None:
+            try:
+                source_code = Path(f.file_path).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:
+                source_code = ""
+            w("  Generating LLM fix...\n")
+            diff = llm_engine.generate_fix(f, source_code)
+            if diff:
+                w("  LLM diff patch:\n")
+                for dl in diff.splitlines():
+                    if use_color:
+                        if dl.startswith("+") and not dl.startswith("+++"):
+                            dl = f"\x1b[32m{dl}\x1b[0m"
+                        elif dl.startswith("-") and not dl.startswith("---"):
+                            dl = f"\x1b[31m{dl}\x1b[0m"
+                    w(f"    {dl}\n")
+                if apply_flag:
+                    ok = _apply_diff_to_file(f.file_path, diff)
+                    if ok:
+                        w(f"  ✅ Patch applied to {f.file_path}\n")
+                    else:
+                        w(f"  ⚠️  Failed to apply patch to {f.file_path}\n")
+            else:
+                w("  (LLM returned no usable diff)\n")
+
         w("\n")
 
     w("-" * 64 + "\n")
