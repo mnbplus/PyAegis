@@ -191,6 +191,9 @@ class TaintTracker:
         # key: (func_name, frozenset(tainted_param_names)) -> bool(return_tainted)
         self._return_taint_cache: Dict[Tuple[str, frozenset], bool] = {}
 
+        # Cache for inter-procedural analysis to avoid repeat walks
+        self._analysis_cache: Set[Tuple[str, frozenset]] = set()
+
         # Instance attribute taint tracking:
         # key: instance_name (e.g. 'self'), value: set of tainted attribute names
         self._instance_taints: Dict[str, Set[str]] = {}
@@ -216,6 +219,7 @@ class TaintTracker:
 
         # Reset instance taints for this CFG analysis
         self._instance_taints = {}
+        self._analysis_cache = set()
 
         for fn_name, fnctx in fnmap.items():
             # Seed taint: if the function has a parameter named like a source root
@@ -227,7 +231,7 @@ class TaintTracker:
 
             # Framework-aware: if function is decorated with a route decorator,
             # all its args are considered tainted (they come from HTTP requests).
-            if self._fn_has_route_decorator(fnctx, cfg.get(fn_name, {})):
+            if self._fn_has_route_decorator(fnctx, fnctx.meta):
                 for arg in fnctx.args:
                     if arg != "self":
                         tainted_vars.add(arg)
@@ -462,6 +466,30 @@ class TaintTracker:
             for elt in target.elts:
                 self._taint_unpack_target(elt, tainted_vars, is_tainted, is_clean)
 
+    def _call_arg_tainted_params(
+        self,
+        call: ast.Call,
+        callee: _FnContext,
+        tainted_vars: Set[str],
+        fnmap: Dict[str, _FnContext],
+        callstack: List[str],
+        tainted_params: Set[str],
+    ) -> Set[str]:
+        """Map tainted call arguments onto callee parameter names."""
+        callee_tainted_params: Set[str] = set()
+        for i, a in enumerate(call.args):
+            if i < len(callee.args) and self._is_tainted_expr(
+                a, tainted_vars, fnmap, callstack, tainted_params
+            ):
+                callee_tainted_params.add(callee.args[i])
+        for kw in call.keywords:
+            if kw.arg and kw.arg in callee.args:
+                if self._is_tainted_expr(
+                    kw.value, tainted_vars, fnmap, callstack, tainted_params
+                ):
+                    callee_tainted_params.add(kw.arg)
+        return callee_tainted_params
+
     def _record_instance_attr_taint(
         self,
         target: ast.AST,
@@ -493,8 +521,33 @@ class TaintTracker:
         callstack: List[str],
     ) -> None:
         """Analyze a single function body, updating vulnerabilities."""
+        # Normalize taint state and avoid repeated analyses
+        tainted_vars = set(tainted_vars) | set(tainted_params)
+        key = (fnctx.name, frozenset(tainted_vars))
+        if key in self._analysis_cache:
+            return
+        self._analysis_cache.add(key)
+
         mod = ast.Module(body=fnctx.body, type_ignores=[])
         for node in ast.walk(mod):
+            # Inter-procedural: propagate taint into local callees with tainted args
+            if isinstance(node, ast.Call):
+                callee_name = self._get_full_name(node.func)
+                if callee_name in fnmap and callee_name not in callstack:
+                    callee = fnmap[callee_name]
+                    callee_tainted_params = self._call_arg_tainted_params(
+                        node, callee, tainted_vars, fnmap, callstack, tainted_params
+                    )
+                    if callee_tainted_params:
+                        self._analyze_function(
+                            fnctx=callee,
+                            fnmap=fnmap,
+                            filepath=filepath,
+                            tainted_vars=set(callee_tainted_params),
+                            tainted_params=callee_tainted_params,
+                            callstack=callstack + [callee_name],
+                        )
+
             # Assignments
             if isinstance(node, ast.Assign):
                 value = node.value

@@ -1,7 +1,7 @@
 """PyAegis CLI.
 
 UX goals:
-- Provide discoverable subcommands: scan / explain / list-rules / init / version
+- Provide discoverable subcommands: scan / explain / list-rules / init / version / fix
 - Keep backwards compatibility: `pyaegis <path>` still performs a scan.
 - Friendly first-run behavior: no-arg invocation prints help.
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import time
 import logging
@@ -21,6 +22,7 @@ import yaml
 from pyaegis.core.parser import ParallelProjectParser
 from pyaegis.core.taint import TaintTracker
 from pyaegis.exceptions import ParserError
+from pyaegis.fixers import RemediationEngine
 from pyaegis.models import ScanResult
 from pyaegis.reporters import (
     CSVReporter,
@@ -101,11 +103,30 @@ def _merge_config(
 
     This keeps CLI flags authoritative.
     """
-
     for k in keys:
         if getattr(args, k, None) is None and k in config:
             setattr(args, k, config[k])
     return args
+
+
+def _colorize_severity(sev: str, enabled: bool) -> str:
+    sev_u = (sev or "").upper()
+    if not enabled:
+        return sev_u
+    colors = {
+        "CRITICAL": "31",
+        "HIGH": "38;5;208",
+        "MEDIUM": "33",
+        "LOW": "34",
+        "INFO": "90",
+    }
+    code = colors.get(sev_u, "0")
+    return f"\x1b[{code}m{sev_u}\x1b[0m"
+
+
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -113,6 +134,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "Examples:\n"
         "  pyaegis scan .\n"
         "  pyaegis scan src --severity HIGH,CRITICAL\n"
+        "  pyaegis fix app.py --dry-run\n"
+        "  pyaegis fix app.py --apply\n"
         "  pyaegis explain PYA-001\n"
         "  pyaegis list-rules\n"
         "  pyaegis init\n"
@@ -134,7 +157,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command")
 
-    # scan
+    # --- scan ---
     p_scan = sub.add_parser(
         "scan",
         help="Scan a file or directory",
@@ -153,7 +176,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output format.",
     )
     p_scan.add_argument("--output", default=None, help="Output file path.")
-
     p_scan.add_argument(
         "--workers",
         type=int,
@@ -166,7 +188,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Per-file parsing timeout in seconds (best-effort).",
     )
-
     p_scan.add_argument(
         "--quiet",
         action="store_true",
@@ -183,14 +204,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable colored output (Text format only).",
     )
 
-    # explain
+    # --- explain ---
     p_explain = sub.add_parser("explain", help="Explain a rule id")
     p_explain.add_argument("rule_id", help="Rule id, e.g. PYA-001")
 
-    # list-rules
+    # --- list-rules ---
     sub.add_parser("list-rules", help="List all built-in rules")
 
-    # init
+    # --- init ---
     p_init = sub.add_parser(
         "init",
         help="Create a .pyaegis.yml config file in the current directory",
@@ -201,10 +222,48 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing .pyaegis.yml if it already exists.",
     )
 
-    # version
+    # --- version ---
     sub.add_parser("version", help="Show version")
 
+    # --- fix ---
+    p_fix = sub.add_parser(
+        "fix",
+        help="Show AI remediation suggestions for a file (optionally apply patches)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_fix.add_argument("target", help="Python file to scan and fix")
+    p_fix.add_argument(
+        "--rules",
+        default=None,
+        help="Path to rules YAML file (defaults to bundled default rules).",
+    )
+    p_fix.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show unified-diff patches without modifying the file.",
+    )
+    p_fix.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply patches directly to the source file (DESTRUCTIVE — makes a .bak backup).",
+    )
+    p_fix.add_argument(
+        "--severity",
+        default=None,
+        help="Comma-separated severity allowlist, e.g. HIGH,CRITICAL",
+    )
+    p_fix.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable coloured output.",
+    )
+
     return parser
+
+
+# ---------------------------------------------------------------------------
+# Command implementations
+# ---------------------------------------------------------------------------
 
 
 def _cmd_version() -> int:
@@ -236,7 +295,6 @@ def _cmd_init(force: bool) -> int:
     content = {
         "rules": _default_rules_path().replace("\\", "/"),
         "format": "text",
-        # allowlist; set to null to disable filtering
         "severity": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
         "workers": max(os.cpu_count() or 4, 1),
         "timeout": None,
@@ -244,7 +302,6 @@ def _cmd_init(force: bool) -> int:
         "no_color": False,
     }
 
-    # Keep it human-friendly and editable.
     yaml_text = (
         "# PyAegis configuration\n"
         "#\n"
@@ -263,36 +320,72 @@ def _cmd_init(force: bool) -> int:
     return 0
 
 
+def _run_taint_scan(
+    target: str,
+    rules_path: str,
+    workers: int = 1,
+    timeout: Optional[float] = None,
+    show_progress: bool = False,
+) -> tuple[list, list]:
+    """Shared scan logic used by both `scan` and `fix` commands.
+
+    Returns (py_files, findings).
+    """
+    py_files = [target] if os.path.isfile(target) else _find_python_files(target)
+
+    rules: dict = {}
+    if os.path.exists(rules_path):
+        rules = _load_yaml(rules_path)
+    if not rules:
+        rules = {
+            "inputs": ["input", "request", "sys.argv", "os.getenv"],
+            "sinks": ["eval", "exec", "os.system", "subprocess.*"],
+            "sanitizers": ["html.escape", "bleach.clean"],
+        }
+
+    proj_parser = ParallelProjectParser(pool_size=workers, timeout=timeout)
+    cfgs = proj_parser.parse_all(py_files, show_progress=show_progress)
+
+    tracker = TaintTracker(
+        sources=rules.get("inputs", []),
+        sinks=rules.get("sinks", []),
+        sanitizers=rules.get("sanitizers", []),
+        conditional_sinks=rules.get("conditional_sinks", []),
+        source_decorators=rules.get("source_decorators", []),
+    )
+    for filepath, cfg in cfgs.items():
+        if cfg:
+            tracker.analyze_cfg(cfg, filepath)
+
+    return py_files, tracker.get_findings()
+
+
 def _scan(args: argparse.Namespace) -> int:
     if args.quiet:
         logger.setLevel(logging.WARNING)
-
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
-    # Optional project config: .pyaegis.yml in current directory
+    # Optional project config
     cfg_path = Path.cwd() / ".pyaegis.yml"
-    config = {}
+    config: dict = {}
     if cfg_path.exists():
         try:
             config = _load_yaml(str(cfg_path))
         except Exception as e:  # pragma: no cover
             logger.warning(f"Failed to read {cfg_path}: {e}")
 
-    # merge config defaults
     args = _merge_config(
         args,
         config,
         keys=["rules", "format", "workers", "timeout", "severity"],
     )
 
-    # finalize defaults
     rules_path = args.rules or _default_rules_path()
     out_format = args.format or "text"
     workers = int(args.workers) if args.workers is not None else max(os.cpu_count() or 4, 1)
     timeout = args.timeout
 
-    # severity filter from config can be list
     sev_allow: Optional[set[str]]
     if isinstance(args.severity, list):
         sev_allow = {str(x).strip().upper() for x in args.severity}
@@ -317,50 +410,22 @@ def _scan(args: argparse.Namespace) -> int:
 
     start_time = time.time()
 
-    py_files = [target] if os.path.isfile(target) else _find_python_files(target)
-    if not py_files:
-        logger.warning("No Python files found.")
-
     if not args.quiet:
-        logger.info(f"Parsing {len(py_files)} Python files using Multiprocessing AST...")
-
-    proj_parser = ParallelProjectParser(pool_size=workers, timeout=timeout)
+        logger.info("Parsing Python files using Multiprocessing AST...")
 
     try:
-        cfgs = proj_parser.parse_all(py_files, show_progress=not args.quiet)
+        py_files, findings = _run_taint_scan(
+            target,
+            rules_path,
+            workers=workers,
+            timeout=timeout,
+            show_progress=not args.quiet,
+        )
     except ParserError as e:
         logger.critical(str(e))
         return 1
 
-    rules = {}
-    if os.path.exists(rules_path):
-        rules = _load_yaml(rules_path)
-
-    # default fallback
-    if not rules:
-        rules = {
-            "inputs": ["input", "request", "sys.argv", "os.getenv"],
-            "sinks": ["eval", "exec", "os.system", "subprocess.*"],
-            "sanitizers": ["html.escape", "bleach.clean"],
-        }
-
-    if not args.quiet:
-        logger.info("Performing Taint Tracking against Context Sinks...")
-
-    tracker = TaintTracker(
-        sources=rules.get("inputs", []),
-        sinks=rules.get("sinks", []),
-        sanitizers=rules.get("sanitizers", []),
-        conditional_sinks=rules.get("conditional_sinks", []),
-        source_decorators=rules.get("source_decorators", []),
-    )
-
-    for filepath, cfg in cfgs.items():
-        if cfg:
-            tracker.analyze_cfg(cfg, filepath)
-
     duration = time.time() - start_time
-    findings = tracker.get_findings()
 
     if sev_allow is not None:
         findings = [f for f in findings if (f.severity or "").upper() in sev_allow]
@@ -393,49 +458,48 @@ def _scan(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    argv = list(argv) if argv is not None else sys.argv[1:]
+def _apply_patch_to_source(
+    source_code: str,
+    finding,
+    engine: RemediationEngine,
+) -> Optional[str]:
+    """Apply a single finding's rewrite directly to the source string.
 
-    parser = _build_parser()
-
-    # Friendly first-run: show help when invoked with no args.
-    if not argv:
-        parser.print_help(sys.stdout)
-        return 2
-
-    # Backwards-compatibility:
-    #   pyaegis <path>  -> pyaegis scan <path>
-    # but keep flags working: pyaegis --version / -h
-    known_cmds = {"scan", "explain", "list-rules", "init", "version"}
-    if argv and not argv[0].startswith("-") and argv[0] not in known_cmds:
-        argv = ["scan", *argv]
-
-    args = parser.parse_args(argv)
-
-    # global shortcuts
-    if args.version:
-        return _cmd_version()
-
-    if args.debug:
-        logger.setLevel(logging.DEBUG)
-
-    cmd = getattr(args, "command", None)
-    if cmd == "version":
-        return _cmd_version()
-    if cmd == "list-rules":
-        return _cmd_list_rules()
-    if cmd == "explain":
-        return _cmd_explain(args.rule_id)
-    if cmd == "init":
-        return _cmd_init(args.force)
-    if cmd == "scan":
-        return _scan(args)
-
-    # If we get here, user passed something like `pyaegis -h` which argparse handles,
-    # or an incomplete command.
-    parser.print_help(sys.stdout)
-    return 2
+    Returns modified source or None if no rewrite matched.
+    """
+    lines = source_code.splitlines(keepends=True)
+    line_idx = (finding.line_number or 0) - 1
+    if line_idx < 0 or line_idx >= len(lines):
+        return None
+    original_line = lines[line_idx]
+    rewritten = engine._rewrite_line(original_line, finding)
+    if rewritten is None or rewritten == original_line:
+        return None
+    new_lines = lines[:line_idx] + [rewritten] + lines[line_idx + 1:]
+    return "".join(new_lines)
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def _cmd_fix(args: argparse.Namespace) -> int:
+    """Scan a single file and display / apply AI remediation suggestions."""
+    target = args.target
+    if not os.path.isfile(target):
+        sys.stderr.write(f"fix: '{target}' is not a file or does not exist.\n")
+        return 1
+
+    use_color = not getattr(args, "no_color", False)
+    rules_path = getattr(args, "rules", None) or _default_rules_path()
+
+    try:
+        _, findings = _run_taint_scan(target, rules_path, workers=1, show_progress=False)
+    except ParserError as e:
+        sys.stderr.write(f"fix: parse error: {e}\n")
+        return 1
+
+    # severity filter
+    sev_allow: Optional[set] = None
+    if getattr(args, "severity", None):
+        try:
+            sev_allow = _parse_severity_csv(args.severity)
+        except ValueError as e:
+            sys.stderr.write(str(e) + "\n")
+            return

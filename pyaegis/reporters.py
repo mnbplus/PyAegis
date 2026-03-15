@@ -20,6 +20,9 @@ from typing import Any, Dict, List, Optional
 
 from .models import Finding, ScanResult
 from .rules_catalog import as_reporter_meta
+from .fixers import RemediationEngine
+
+_remediation_engine = RemediationEngine()
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +209,17 @@ class TextReporter:
                     # keep indentation consistent
                     for line in ctx.splitlines(True):
                         w("  " + line)
+
+                # --- AI remediation snippet (P3) ---
+                try:
+                    rem = _remediation_engine.get_remediation(f)
+                    w(f"\n  Suggested Fix : {rem.title}\n")
+                    w(f"  Hint          : {rem.explanation}\n")
+                    w("  Example (after):\n")
+                    for ex_line in rem.example_after.splitlines():
+                        w(f"    {ex_line}\n")
+                except Exception:
+                    pass
 
                 w("\n")
 

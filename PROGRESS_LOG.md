@@ -1,33 +1,32 @@
 # PyAegis Progress Log
 
-<!-- 由 OpenClaw 五分钟报告 cron 自动追加 -->
+<!-- 自动追加，勿手动排序 -->
 
 ---
 
-## 2026-03-15 19:25 (Asia/Shanghai)
+## 2026-03-15 20:35 (Asia/Shanghai)
 
-### ✅ 已完成
-- **aegis-ux2**（commit `876b350`）：`pyaegis scan <path>` 子命令、`list-rules`、`version`、`explain <rule-id>` 命令；`--severity` 过滤、`--quiet`、`--no-color`；彩色终端输出（CRITICAL红/HIGH橙/MEDIUM黄/LOW蓝）；代码上下文展示；统计摘要。22/22 测试通过。
-- **aegis-performance**（commit `3f166d7`，GitHub 最新）：多进程并行扫描（`--workers`）、文件缓存、rich 进度条。
-- **docs**（commit `d78dbfe`）：detector catalog、SARIF guide、performance docs、improved README。
-- **feat**（commit `e6d826`）：SARIF 2.1.0 with CWE/fix hints、CI integrations、dogfood workflow。
+### 完成内容
+- `aegis-next`（d9d5f5b6）已完成本轮任务：新增4个规则文件（xxe.yml/ssrf.yml/deserialization.yml/path_traversal.yml），全量测试 50 passed，commit 并 push 到 main
+- `aegis-next`（de214bf3）完成了本轮更早的任务：修复 TaintTracker 中 `_call_arg_tainted_params` 缺失导致的崩溃，补齐过程间传播路径，全绿后 push
+- GitHub 最新5次提交（截至 20:29 UTC+8）：
+  1. `c6e1f9e` fix: tuple unpacking taint, class instance attr tracking, variable reassignment sensitivity（19:29）
+  2. `2ef1aea` fix: tuple unpacking taint propagation, class instance attribute tracking（19:27）
+  3. `876b350` ux: scan subcommand, list-rules, version, severity filter, colored output（19:14）
+  4. `2a2cdb1` ux: scan/explain/list-rules commands, colored output, code context, severity filter（19:11）
+  5. `3f166d7` perf: multiprocessing scan, file cache, progress bar, --workers flag（18:35）
 
-### 🔄 进行中（4 个活跃 agent）
-- **aegis-alias2**：解包赋值污点追踪、类实例属性追踪，当前正在读 `taint.py:520-545`
-- **aegis-rule-engine2**：条件约束规则（`shell=True` 才报警）+ 框架感知 Source，刚启动（模型 gpt-5.2，绕过 rate limit）
-- **aegis-interprocedural**：全局符号表 + 跨模块调用图 + 跨文件污点链，正在读 `test_cli.py` 设计兼容性
-- **aegis-detectors**：硬编码密钥/弱加密/insecure deserialization/CWE 映射，正在检查 `default.yml`
+### 当前进行中
+- `aegis-publisher`（d928a96f，label=aegis-publisher，model=gpt-5.2-codex-high）— 正在 poll process，监控 CI/push 流程，仍活跃
+- `aegis-dev-b`（84e4b236，label=aegis-dev-b，model=gpt-5.2-codex-high）— 正在读取 fixers.py，处理修复/补全任务，仍活跃
+- `aegis-detectors2`（94fad81f）— 已收到任务（硬编码密钥/弱加密/反序列化/不安全随机检测器），状态进行中
 
-### ⚠️ 问题
-- `aegis-rule-engine`（v1）触发 Claude Sonnet 429 rate limit，已由 `aegis-rule-engine2`（gpt-5.2）替代继续
-- `aegis-ux`、`aegis-alias-analysis` 静默退出（totalTokens=0，spawn 时模型 fallback 失败）
-- `aegis-next` 发现 `PROGRESS_LOG.md` 历史条目混入了「代理托盘/ShadowsocksManager」描述，与实际仓库（SAST 工具）完全不符，主动终止并告警
-- `PRODUCT_RESEARCH.md` 不存在
+### 遇到的问题
+- 部分 aegis-next 会话（de214bf3）发现 `taint.py` 中 inter-procedural 分支调用了未实现的方法，导致核心测试失败，已修复
+- 多个 aegis-next 实例（2e8b2c12、f5979455）产生了空输出后退出（0 token output），疑似模型切换到 qwen3.5 thinking 导致超时或无输出；后续应固定 codex 模型
+- aegis-publisher（e82bed5d）仅输出占位文字 "I understand the request" 后即停止，未实际执行任何工具调用；后续 publisher 由新实例（d928a96f）接替，改用 codex 模型后恢复正常
 
-### 📝 下一步
-- 等待 4 个活跃 agent 完成并 commit
-- 下轮报告评估是否需要 spawn alias/interprocedural/detectors 的后继 agent
-- 考虑创建 PRODUCT_RESEARCH.md（市场定位/竞品分析），目前 aegis-research 因 totalTokens=0 未产出
-- 清理 PROGRESS_LOG.md 中历史错误描述（非本仓库内容）
-
----
+### 下一步
+- aegis-dev-b 完成 fixers.py 修复后，publisher 应自动审核并 push
+- aegis-detectors2 完成4个检测器（硬编码密钥/弱加密/反序列化/不安全随机）后，测试数量预计从50增至60+
+- 后续优化方向：跨文件 inter-procedural taint、`--ruleset` 快捷入口、conditional_sinks 扩展
