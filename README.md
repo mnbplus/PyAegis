@@ -33,6 +33,8 @@
 
 **PyAegis** is a Python-first SAST tool that goes beyond regex matching. It parses your code into an AST, builds a lightweight control-flow model, and performs **taint-style source → sink analysis** to find real injection paths — not just suspicious patterns.
 
+🤖 **LLM Auto-Fix** — When a real vulnerability is found, PyAegis can automatically generate and apply a secure fix using AI. This is the feature that sets PyAegis apart from every other Python SAST tool.
+
 ---
 
 ## Table of Contents
