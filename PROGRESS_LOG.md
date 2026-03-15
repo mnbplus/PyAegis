@@ -114,3 +114,28 @@
 
 ### 下一步
 - 可补充 CLI 测试覆盖 ruleset 分支（含未知 ruleset 错误提示）
+
+## 2026-03-16 00:35 — 五分钟定时报告
+
+### 完成内容
+- aegis-next(2af0e238) ✅ CLI --ruleset/--list-rulesets 支持完整落地（commit ff15847），scan/remediate/fix 三命令均支持，未知 ruleset 给出可用列表提示；docs/rules.md 补充 ruleset 使用说明
+- aegis-gtm(724436d3) ✅ GTM 全部完成：README 定位重写（新 pitch + LLM Auto-Fix 首位 + 早期用户引用）、action.yml 创建（6 inputs/1 output/composite run）、docs/github-action.md 完整文档（3 示例 + 生产 workflow + Inputs/Outputs 表），commit 250829c
+- aegis-refactor(9c4d5006) ✅ 框架插件系统完整落地（d93683a）
+
+### GitHub 最新 HEAD
+- 29f602a feat: add SARIF snippets in results（API 缓存，本地有更多提交）
+
+### 当前活跃 Agent
+- aegis-next(1ef0f749) [hajimicodex] 活跃中：正在检查 sourceVar API 兼容性，计划取消跳过的测试
+- aegis-api(4f988e99) [claude-sonnet-4-6] 活跃中：正在读取 cli.py 核心扫描命令实现
+
+### 遇到问题
+- 无新增阻塞问题
+- GitHub Code Scanning (Dogfood CI) 仍需用户手动在仓库 Settings > Security Analysis 启用
+- 主 QQ 会话收到深度技术建议（Visitor 模式重构、类型推导、增量扫描、Benchmark CI），已转递给后续 agent 作为方向参考
+
+### 下一步
+- aegis-next 完成 sourceVar API 兼容性修复后 push
+- 待实施深度优化方向：TaintTracker Visitor 模式重构、Type Hints 类型推导、增量扫描（git diff）、Benchmark CI（靶场 + Precision/Recall）
+- 待补充：docs/usage.md 实质内容、demo.gif 真实录屏
+

@@ -20,6 +20,7 @@ from typing import Iterable, Optional, Sequence
 
 import yaml
 
+from pyaegis.core.incremental import get_changed_files, get_affected_files
 from pyaegis.core.parser import ParallelProjectParser
 from pyaegis.core.taint import TaintTracker
 from pyaegis.exceptions import ParserError
@@ -249,6 +250,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-color",
         action="store_true",
         help="Disable colored output (Text format only).",
+    )
+    p_scan.add_argument(
+        "--incremental",
+        action="store_true",
+        default=False,
+        help="Enable incremental mode: only scan Python files changed in git diff.",
+    )
+    p_scan.add_argument(
+        "--base-ref",
+        default="HEAD~1",
+        metavar="BASE_REF",
+        help="Base git ref to diff against (default: HEAD~1). Only used with --incremental.",
     )
 
     # --- explain ---
@@ -624,6 +637,67 @@ def _scan(args: argparse.Namespace) -> int:
         return 1
 
     start_time = time.time()
+
+    # ── incremental mode: restrict to git-diff changed files ──────
+    incremental = getattr(args, "incremental", False)
+    base_ref = getattr(args, "base_ref", "HEAD~1") or "HEAD~1"
+    if incremental:
+        repo_root = target if os.path.isdir(target) else os.path.dirname(target)
+        changed = get_changed_files(base_ref=base_ref, repo_path=repo_root)
+        if not changed:
+            if not args.quiet:
+                sys.stdout.write("[incremental] No changed Python files detected — nothing to scan.\n")
+            return 0
+        if not args.quiet:
+            logger.info(
+                "[incremental] Scanning %d changed file(s) (base: %s)",
+                len(changed),
+                base_ref,
+            )
+        # Override target to the list of changed files by scanning them one-by-one.
+        # We reuse _run_taint_scan per-file and aggregate.
+        all_py_files: list[str] = []
+        all_findings: list = []
+        for _f in changed:
+            try:
+                _pf, _fi = _run_taint_scan(
+                    _f,
+                    rules_path,
+                    workers=1,
+                    timeout=timeout,
+                    show_progress=False,
+                )
+                all_py_files.extend(_pf)
+                all_findings.extend(_fi)
+            except ParserError as e:
+                logger.warning("[incremental] Skipping %s: %s", _f, e)
+        duration = time.time() - start_time
+        if sev_allow is not None:
+            all_findings = [f for f in all_findings if (f.severity or "").upper() in sev_allow]
+        scan_result = ScanResult(
+            total_files=len(all_py_files),
+            findings=all_findings,
+            duration_seconds=float(f"{duration:.3f}"),
+        )
+        output_stream = (
+            open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
+        )
+        try:
+            if out_format == "json":
+                reporter = JSONReporter(output_stream)
+            elif out_format == "sarif":
+                reporter = SARIFReporter(output_stream)
+            elif out_format == "csv":
+                reporter = CSVReporter(output_stream)
+            elif out_format == "html":
+                reporter = HTMLReporter(output_stream)
+            else:
+                reporter = TextReporter(output_stream, color=not args.no_color)
+            reporter.report(scan_result)
+        finally:
+            if args.output:
+                output_stream.close()
+        return 1 if all_findings else 0
 
     if not args.quiet:
         logger.info("Parsing Python files using Multiprocessing AST...")
