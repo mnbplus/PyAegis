@@ -4,6 +4,7 @@ import os
 import time
 import yaml
 import logging
+
 from pyaegis.core.parser import ParallelProjectParser
 from pyaegis.core.taint import TaintTracker
 from pyaegis.exceptions import ParserError
@@ -20,11 +21,13 @@ logger = logging.getLogger("pyaegis")
 
 
 def load_rules(rule_path: str):
+    """Load YAML rules from disk."""
     with open(rule_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
 
 
 def find_python_files(directory: str):
+    """Recursively find *.py files under a directory."""
     py_files = []
     for root, _, files in os.walk(directory):
         for f in files:
@@ -83,16 +86,20 @@ def main():
         logger.critical(str(e))
         sys.exit(1)
 
+    # Default in-code fallback; will be overridden by YAML if present.
     rules = {
-        "inputs": ["input", "request", "os.environ"],
-        "sinks": ["eval", "exec", "os.system", "subprocess.call"],
+        "inputs": ["input", "request", "sys.argv", "os.getenv"],
+        "sinks": ["eval", "exec", "os.system", "subprocess.*"],
+        "sanitizers": ["html.escape", "bleach.clean"],
     }
     if os.path.exists(args.rules):
         rules = load_rules(args.rules)
 
     logger.info("Performing Taint Tracking against Context Sinks...")
     tracker = TaintTracker(
-        sources=rules.get("inputs", []), sinks=rules.get("sinks", [])
+        sources=rules.get("inputs", []),
+        sinks=rules.get("sinks", []),
+        sanitizers=rules.get("sanitizers", []),
     )
 
     for filepath, cfg in cfgs.items():

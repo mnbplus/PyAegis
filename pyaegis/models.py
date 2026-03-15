@@ -12,6 +12,7 @@ class Finding:
     line_number: int
     sink_context: str
     severity: str = "CRITICAL"
+    source_var: str = ""
 
 
 @dataclass
