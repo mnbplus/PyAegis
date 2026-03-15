@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from .models import Finding, ScanResult
-from .rules_catalog import as_reporter_meta
+from .rules_catalog import RULES, as_reporter_meta
 from .fixers import RemediationEngine
 
 _remediation_engine = RemediationEngine()
@@ -33,15 +33,7 @@ _remediation_engine = RemediationEngine()
 # To add/update rule descriptions, edit pyaegis/rules_catalog.py.
 
 RULE_METADATA: Dict[str, Dict[str, str]] = {
-    rid: as_reporter_meta(rid)
-    for rid in [
-        "PYA-001",
-        "PYA-002",
-        "PYA-003",
-        "PYA-004",
-        "PYA-005",
-        "PYA-006",
-    ]
+    rid: as_reporter_meta(rid) for rid in RULES.keys()
 }
 
 _GENERIC_META: Dict[str, str] = {
@@ -203,7 +195,9 @@ class TextReporter:
                 if meta.get("fix"):
                     w(f"  Fix    : {meta.get('fix')}\n")
 
-                ctx = _read_context(f.file_path, f.line_number, radius=self.context_lines)
+                ctx = _read_context(
+                    f.file_path, f.line_number, radius=self.context_lines
+                )
                 if ctx:
                     w("\n  Code:\n")
                     # keep indentation consistent
@@ -372,7 +366,8 @@ class HTMLReporter:
         if total_findings == 0:
             rows_html = (
                 "<tr><td colspan='9' class='empty'>"
-                "No vulnerabilities found." "</td></tr>"
+                "No vulnerabilities found."
+                "</td></tr>"
             )
         else:
             rows_html = "\n".join(
@@ -559,9 +554,7 @@ class HTMLReporter:
 class SARIFReporter:
     """Produces a SARIF 2.1.0 document."""
 
-    SCHEMA_URI = (
-        "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
-    )
+    SCHEMA_URI = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
     TOOL_NAME = "PyAegis"
     TOOL_VERSION = "0.2.0"
     TOOL_INFO_URI = "https://github.com/mnbplus/PyAegis"

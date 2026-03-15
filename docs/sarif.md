@@ -263,6 +263,6 @@ sarif ls pyaegis.sarif
 
 ## Known Limitations
 
-- The `rules` array in the `driver` object is currently empty. Rule descriptors (with help text, default configuration, etc.) will be added in a future release.
+- Rule descriptors under `runs[].tool.driver.rules` are included for built-in rule IDs. For unknown rule IDs, PyAegis falls back to a generic descriptor.
 - `artifactLocation.uri` uses the path as provided to the scanner; relative paths are recommended for portability.
-- `snippet.text` currently contains the **function name** (context), not the source line. Full source snippets are planned.
+- `region.snippet` is not currently emitted; snippets are planned.

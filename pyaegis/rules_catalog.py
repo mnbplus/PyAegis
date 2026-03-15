@@ -138,6 +138,60 @@ RULES: Dict[str, RuleInfo] = {
             "within that base. Avoid using user input as a filename directly."
         ),
     ),
+    "PYA-007": RuleInfo(
+        id="PYA-007",
+        name="WeakCryptography",
+        short_description="Use of weak cryptographic algorithm",
+        full_description=(
+            "The code uses a weak or broken cryptographic algorithm (e.g. MD5, SHA1, DES) "
+            "which may be vulnerable to collisions or brute-force attacks."
+        ),
+        severity="MEDIUM",
+        cwe="CWE-327",
+        cwe_uri="https://cwe.mitre.org/data/definitions/327.html",
+        owasp="A02:2021",
+        help_uri="https://owasp.org/www-community/Weak_Cryptography",
+        remediation=(
+            "Use modern, recommended algorithms and libraries (e.g. SHA-256/512, "
+            "bcrypt/argon2 for passwords, AES-GCM for encryption)."
+        ),
+    ),
+    "PYA-008": RuleInfo(
+        id="PYA-008",
+        name="InsecureRandomness",
+        short_description="Use of insecure randomness in a security context",
+        full_description=(
+            "The code uses Python's random module for values that may require "
+            "cryptographic strength (tokens, secrets, session IDs)."
+        ),
+        severity="MEDIUM",
+        cwe="CWE-338",
+        cwe_uri="https://cwe.mitre.org/data/definitions/338.html",
+        owasp="A02:2021",
+        help_uri="https://owasp.org/www-community/vulnerabilities/Insecure_Randomness",
+        remediation=(
+            "Use secrets module (secrets.token_urlsafe, secrets.randbelow) or "
+            "os.urandom for cryptographic randomness."
+        ),
+    ),
+    "PYA-010": RuleInfo(
+        id="PYA-010",
+        name="HardcodedSecret",
+        short_description="Possible hardcoded secret/credential",
+        full_description=(
+            "The code appears to contain a hardcoded password, token, API key, or other secret. "
+            "Hardcoded secrets can be leaked via source control and enable account compromise."
+        ),
+        severity="HIGH",
+        cwe="CWE-798",
+        cwe_uri="https://cwe.mitre.org/data/definitions/798.html",
+        owasp="A02:2021",
+        help_uri="https://owasp.org/www-community/vulnerabilities/Use_of_hard-coded_password",
+        remediation=(
+            "Remove secrets from source code. Use environment variables or a secrets manager, "
+            "rotate exposed credentials, and add secret scanning to CI."
+        ),
+    ),
 }
 
 
