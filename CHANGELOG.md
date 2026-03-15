@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-15
+
+### 🚀 Added
+- **精准的漏洞追踪 (Source Variable Tracking)**: 新增了对污染源的追根溯源能力 (`source_var` field)。不仅仅是找到汇聚点 (Sink)，我们现在能通过报告精确告诉安全工程师：漏洞到底是由哪个被污染的变量触发的。
+- **动态严重度与特征 ID分级 (Sink-Aware Rule IDs)**: 根据进入的敏感操作不同（如 `eval`, `exec`, `os.system` 等），现在系统会自动区分对应更明确的安全事件 ID (`PYA-101`至`PYA-108`) 和特定描述。
+- **新增高危框架识别 (Framework Expansions)**: 扩充了默认安全监测规则库，全新覆盖 Flask (`flask.request.*`)、Django (`django.http.QueryDict`) 等常见框架入口点，以及 `pickle.loads` 和 `yaml.load` 等高危反序列化组件。
+- **现代化 CLI 体验**: 支持了 `--version` 命令标志获取工具版本。
+
+### 🛠️ Infrastructure & Testing
+- 补全了单元测试与端到端集成测试，对文本、JSON结构以及 SARIF 语法层格式均进行了100%全覆盖断言测试。
+- 大幅改进了模块化的 `__init__.py` 输出规范。
+
+
+
 ## [0.1.0] - 2026-03-15
 
 ### 🎉 Added (Highlights)
