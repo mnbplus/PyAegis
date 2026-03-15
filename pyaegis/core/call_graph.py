@@ -72,6 +72,38 @@ class GlobalSymbolTable:
         )
         return mod.strip(".")
 
+    @staticmethod
+    def _package_parts_for_file(file_path: str, module_name: str) -> List[str]:
+        if not module_name:
+            return []
+        is_init = os.path.basename(file_path) == "__init__.py"
+        parts = module_name.split(".") if module_name else []
+        if not is_init and parts:
+            return parts[:-1]
+        return parts
+
+    @staticmethod
+    def _resolve_relative_module(
+        file_path: str, module: str, level: int, *, root_dir: str
+    ) -> str:
+        if level <= 0:
+            return module or ""
+        module_name = GlobalSymbolTable._module_name_for_file(
+            file_path, root_dir=root_dir
+        )
+        if not module_name:
+            return module or ""
+        package_parts = GlobalSymbolTable._package_parts_for_file(
+            file_path, module_name
+        )
+        if level - 1 > len(package_parts):
+            base_parts: List[str] = []
+        else:
+            base_parts = package_parts[: len(package_parts) - (level - 1)]
+        if module:
+            base_parts.extend([p for p in module.split(".") if p])
+        return ".".join([p for p in base_parts if p])
+
     @classmethod
     def build(
         cls, filepaths: Iterable[str], *, root_dir: Optional[str] = None
@@ -125,6 +157,13 @@ class GlobalSymbolTable:
                     imports_map[local] = alias.name
             elif isinstance(node, ast.ImportFrom):
                 modname = node.module or ""
+                if node.level:
+                    modname = self._resolve_relative_module(
+                        abspath,
+                        modname,
+                        node.level,
+                        root_dir=self.root_dir,
+                    )
                 for alias in node.names:
                     if alias.name == "*":
                         continue
@@ -206,6 +245,13 @@ class InterproceduralTaintTracker:
                     module_aliases[local] = alias.name
             elif isinstance(node, ast.ImportFrom):
                 mod = node.module or ""
+                if node.level:
+                    mod = GlobalSymbolTable._resolve_relative_module(
+                        abspath,
+                        mod,
+                        node.level,
+                        root_dir=self.symbol_table.root_dir,
+                    )
                 for alias in node.names:
                     if alias.name == "*":
                         continue
@@ -230,6 +276,9 @@ class InterproceduralTaintTracker:
             head, rest = raw.split(".", 1)
             if head in module_aliases:
                 return f"{module_aliases[head]}.{rest}"
+            # from x import mod as m -> m.f()  (module imported via ImportFrom)
+            if head in name_aliases:
+                return f"{name_aliases[head]}.{rest}"
         return raw
 
     def resolve_symbol(

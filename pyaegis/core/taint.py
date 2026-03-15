@@ -360,6 +360,17 @@ class TaintTracker:
                     result[local] = alias.name
             elif isinstance(node, ast.ImportFrom):
                 mod = node.module or ""
+                if (
+                    node.level
+                    and self.symbol_table is not None
+                    and GlobalSymbolTable is not None
+                ):
+                    mod = GlobalSymbolTable._resolve_relative_module(
+                        os.path.abspath(filepath),
+                        mod,
+                        node.level,
+                        root_dir=self.symbol_table.root_dir,
+                    )
                 for alias in node.names:
                     if alias.name == "*":
                         continue
