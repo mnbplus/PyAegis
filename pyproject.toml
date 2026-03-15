@@ -20,11 +20,14 @@ classifiers = [
 requires-python = ">=3.8"
 dependencies = [
     "pyyaml>=6.0.1",
-    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
+ai = [
+    "openai>=1.0.0",
+]
 dev = [
+    "openai>=1.0.0",
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "black>=23.9.1",
@@ -41,7 +44,7 @@ pyaegis = "pyaegis.cli:main"
 # Explicit package discovery to avoid setuptools failing on extra top-level dirs
 # (e.g. the generated "site/" docs folder).
 [tool.setuptools]
-packages = ["pyaegis", "pyaegis.core", "pyaegis.integrations", "pyaegis.rules"]
+packages = ["pyaegis", "pyaegis.core", "pyaegis.frameworks", "pyaegis.integrations", "pyaegis.rules"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import sys
 import time
@@ -88,6 +89,20 @@ def _resolve_ruleset(name: str) -> Optional[str]:
     if key.endswith(".yml") or key.endswith(".yaml"):
         key = Path(key).stem.lower()
     return rulesets.get(key)
+
+
+def _resolve_rules_path(rules: Optional[str], ruleset: Optional[str]) -> str:
+    if rules:
+        return rules
+    if ruleset:
+        resolved = _resolve_ruleset(ruleset)
+        if resolved is None:
+            available = ", ".join(sorted(_available_rulesets().keys()))
+            raise ValueError(
+                f"Unknown ruleset '{ruleset}'. Available: {available}"
+            )
+        return resolved
+    return _default_rules_path()
 
 
 def _load_yaml(path: str) -> dict:
@@ -196,6 +211,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--ruleset",
         default=None,
         help="Shortcut to a bundled ruleset name (e.g. xxe, ssrf, deserialization).",
+    )
+
+    p_scan.add_argument(
+        "--list-rulesets",
+        action="store_true",
+        help="List bundled ruleset names and exit.",
     )
     p_scan.add_argument(
         "--format",
@@ -332,6 +353,99 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _apply_diff_to_file(file_path: str, diff_text: str) -> bool:
+    """Apply a unified-diff patch to a file.
+
+    Supports standard unified diffs (with ---/+++ and @@ hunks). Returns True
+    if the patch applied cleanly, otherwise False. This implementation is
+    intentionally minimal and operates line-based; it does not support binary
+    patches or file renames.
+    """
+    if not diff_text.strip():
+        return False
+
+    try:
+        original_lines = Path(file_path).read_text(
+            encoding="utf-8", errors="replace"
+        ).splitlines(keepends=True)
+    except OSError:
+        return False
+
+    diff_lines = diff_text.splitlines()
+    patched: list[str] = []
+    src_index = 0
+
+    def _strip_prefix(line: str) -> str:
+        if line and line[0] in {" ", "+", "-"}:
+            return line[1:]
+        return line
+
+    i = 0
+    while i < len(diff_lines):
+        line = diff_lines[i]
+        if line.startswith("--- ") or line.startswith("+++ "):
+            i += 1
+            continue
+
+        if line.startswith("@@"):
+            match = re.match(r"@@ -(?P<old>\d+)(?:,(?P<oldlen>\d+))? \+(?P<new>\d+)(?:,(?P<newlen>\d+))? @@", line)
+            if not match:
+                return False
+            old_start = int(match.group("old"))
+            old_len = int(match.group("oldlen") or "1")
+
+            # Copy unchanged lines before this hunk
+            target_index = max(old_start - 1, 0)
+            if target_index < src_index:
+                return False
+            patched.extend(original_lines[src_index:target_index])
+            src_index = target_index
+            i += 1
+
+            consumed = 0
+            while i < len(diff_lines) and not diff_lines[i].startswith("@@"):
+                hunk_line = diff_lines[i]
+                if hunk_line.startswith("--- ") or hunk_line.startswith("+++ "):
+                    i += 1
+                    continue
+                if hunk_line.startswith(" "):
+                    if src_index >= len(original_lines):
+                        return False
+                    if original_lines[src_index].rstrip("\n") != _strip_prefix(hunk_line):
+                        return False
+                    patched.append(original_lines[src_index])
+                    src_index += 1
+                    consumed += 1
+                elif hunk_line.startswith("-"):
+                    if src_index >= len(original_lines):
+                        return False
+                    if original_lines[src_index].rstrip("\n") != _strip_prefix(hunk_line):
+                        return False
+                    src_index += 1
+                    consumed += 1
+                elif hunk_line.startswith("+"):
+                    patched.append(_strip_prefix(hunk_line) + "\n")
+                else:
+                    break
+                i += 1
+
+            if consumed != old_len:
+                # Allow mismatch when diff omits trailing context lines
+                if consumed < old_len:
+                    return False
+            continue
+
+        i += 1
+
+    patched.extend(original_lines[src_index:])
+
+    try:
+        Path(file_path).write_text("".join(patched), encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
@@ -445,6 +559,16 @@ def _scan(args: argparse.Namespace) -> int:
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
+    if getattr(args, "list_rulesets", False):
+        names = sorted(_available_rulesets().keys())
+        if names:
+            sys.stdout.write("Bundled rulesets:\n\n")
+            for name in names:
+                sys.stdout.write(f"- {name}\n")
+        else:
+            sys.stdout.write("No bundled rulesets found.\n")
+        return 0
+
     # Optional project config
     cfg_path = Path.cwd() / ".pyaegis.yml"
     config: dict = {}
@@ -460,7 +584,11 @@ def _scan(args: argparse.Namespace) -> int:
         keys=["rules", "format", "workers", "timeout", "severity"],
     )
 
-    rules_path = args.rules or _default_rules_path()
+    try:
+        rules_path = _resolve_rules_path(args.rules, args.ruleset)
+    except ValueError as e:
+        sys.stderr.write(str(e) + "\n")
+        return 2
     out_format = args.format or "text"
     workers = int(args.workers) if args.workers is not None else max(os.cpu_count() or 4, 1)
     timeout = args.timeout

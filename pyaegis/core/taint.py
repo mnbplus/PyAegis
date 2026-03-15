@@ -429,31 +429,29 @@ class TaintTracker:
             )
 
     def _fn_has_route_decorator(self, fnctx: _FnContext, meta: Any) -> bool:
-        """Return True if the function has a web route decorator."""
-        _ROUTE_PATTERNS = [
-            "*.route",
-            "*.get",
-            "*.post",
-            "*.put",
-            "*.delete",
-            "*.patch",
-            "*.head",
-            "*.options",
-        ]
-        routes = []
-        if isinstance(meta, dict):
-            routes = meta.get("routes", []) or []
-        if routes:
+        """Return True if the function has a web route decorator.
+
+        Delegates to the framework plugin registry for built-in framework
+        patterns (Flask, FastAPI, ...).  Falls back to matching
+        ``self.source_decorators`` for any user-supplied extra patterns.
+        """
+        from pyaegis.frameworks.registry import is_route_function as _registry_check
+
+        func_meta: Dict[str, Any] = meta if isinstance(meta, dict) else {}
+
+        # Check via plugin registry (covers Flask, FastAPI, etc.)
+        if _registry_check(func_meta):
             return True
-        decorators = []
-        if isinstance(meta, dict):
-            decorators = meta.get("decorators", []) or []
-        all_patterns = _ROUTE_PATTERNS + self.source_decorators
-        for dec in decorators:
-            dec_str = str(dec)
-            for pat in all_patterns:
-                if fnmatch.fnmatch(dec_str, pat) or dec_str == pat:
-                    return True
+
+        # Fallback: user-supplied source_decorators
+        if self.source_decorators:
+            decorators = func_meta.get("decorators", []) or []
+            for dec in decorators:
+                dec_str = str(dec)
+                for pat in self.source_decorators:
+                    if fnmatch.fnmatch(dec_str, pat) or dec_str == pat:
+                        return True
+
         return False
 
     def _matches_any(self, name: str, patterns: Set[str]) -> bool:
