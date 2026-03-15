@@ -20,6 +20,9 @@ logging.basicConfig(
 logger = logging.getLogger("pyaegis")
 
 
+__version__ = "0.2.0"
+
+
 def load_rules(rule_path: str):
     """Load YAML rules from disk."""
     with open(rule_path, "r", encoding="utf-8") as f:
@@ -36,9 +39,10 @@ def find_python_files(directory: str):
     return py_files
 
 
-def main():
-    print(
-        r"""
+def main(argv=None):
+    argv = argv if argv is not None else sys.argv[1:]
+
+    banner = r"""
     ____        ___                _
    / __ \__  __/   |  ___  ____ _(_)____
   / /_/ / / / / /| | / _ \/ __ `/ / ___/
@@ -48,10 +52,14 @@ def main():
 
  [ Advanced Python Static Application Security Testing Engine ]
     """
-    )
 
     parser = argparse.ArgumentParser(description="PyAegis SAST Tool")
-    parser.add_argument("target", help="Target file or directory to scan.")
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Show version and exit.",
+    )
+    parser.add_argument("target", nargs="?", help="Target file or directory to scan.")
     parser.add_argument(
         "--rules", default="pyaegis/rules/default.yml", help="Path to rules YAML file."
     )
@@ -63,14 +71,26 @@ def main():
     )
     parser.add_argument("--output", default=None, help="Output file path.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
-    args = parser.parse_args()
+
+    args = parser.parse_args(argv)
+
+    # version shortcut must work without target
+    if args.version:
+        sys.stdout.write(f"PyAegis v{__version__}\n")
+        return 0
+
+    print(banner)
 
     if args.debug:
         logger.setLevel(logging.DEBUG)
 
+    if not args.target:
+        parser.print_help(sys.stderr)
+        return 2
+
     if not os.path.exists(args.target):
         logger.error(f"Target {args.target} not found.")
-        sys.exit(1)
+        return 1
 
     start_time = time.time()
 
@@ -84,7 +104,7 @@ def main():
         cfgs = proj_parser.parse_all(py_files)
     except ParserError as e:
         logger.critical(str(e))
-        sys.exit(1)
+        return 1
 
     # Default in-code fallback; will be overridden by YAML if present.
     rules = {
@@ -115,7 +135,6 @@ def main():
         duration_seconds=float(f"{duration:.3f}"),
     )
 
-    # Configure reporter
     output_stream = (
         open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
     )
@@ -133,9 +152,8 @@ def main():
         if args.output:
             output_stream.close()
 
-    if findings:
-        sys.exit(1)
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
