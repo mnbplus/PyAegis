@@ -151,6 +151,7 @@ class TestCrossModuleTaint:
         assert len(findings) >= 1, "Should detect taint through wrapper chain"
 
     @pytest.mark.skip(reason="inter-procedural taint tracking - ROADMAP P0")
+    @pytest.mark.skip(reason="Requires deep inter-procedural sink analysis - tracked in ROADMAP P0")
     def test_cross_module_sink_in_callee(self, tmp_path):
         """
         Tainted argument flows into callee which contains a sink.
