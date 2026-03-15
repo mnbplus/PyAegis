@@ -1,232 +1,265 @@
-"""Tests for framework-aware taint source detection.
-
-Covers:
-- Flask route decorator params auto-marked as source
-- FastAPI route params
-- Django view params
-- Sanitizer clears taint
 """
+tests/test_framework_sources.py
+
+Tests for framework-aware source detection and sanitizer behavior.
+Covers Flask route parameter tainting and sanitizer clearing taint.
+"""
+import ast
 import textwrap
+import os
+import tempfile
+
+import pytest
+
 from pyaegis.core.taint import TaintTracker
 from pyaegis.core.parser import PyASTParser
 
 
-def _parse_and_track(tmp_path, name, code, sources, sinks, sanitizers=None):
+def _write_tmp(tmp_path, name: str, code: str):
     p = tmp_path / name
     p.write_text(textwrap.dedent(code).lstrip("\n"), encoding="utf-8")
-    parser = PyASTParser(str(p))
-    parser.parse()
-    cfg = parser.extract_cfg()
-    tracker = TaintTracker(
-        sources=sources,
-        sinks=sinks,
-        sanitizers=sanitizers or [],
+    return p
+
+
+def make_tracker(**kwargs):
+    defaults = dict(
+        sources=["request", "request.args", "request.GET", "request.form",
+                 "request.json", "request.data", "input"],
+        sinks=["os.system", "subprocess.*", "eval", "exec", "open"],
+        sanitizers=["html.escape", "bleach.clean"],
     )
-    tracker.analyze_cfg(cfg, filepath=str(p))
-    return tracker.get_findings()
+    defaults.update(kwargs)
+    return TaintTracker(**defaults)
 
 
 # ---------------------------------------------------------------------------
-# Flask
+# Flask route parameter tainting
 # ---------------------------------------------------------------------------
 
-def test_flask_route_param_tainted_to_os_system(tmp_path):
-    """Flask route function param should be treated as tainted source."""
-    code = """
-    import os
-    from flask import Flask
-    app = Flask(__name__)
+class TestFlaskRouteParams:
+    """Flask 路由函数参数应自动被标记为 source。"""
 
-    @app.route('/run/<cmd>')
-    def run_cmd(cmd):
-        os.system(cmd)
-    """
-    findings = _parse_and_track(
-        tmp_path, "flask_param.py", code,
-        sources=["request"],
-        sinks=["os.system"],
-    )
-    assert len(findings) >= 1, "Flask route param should be tainted"
+    def test_flask_route_params_are_tainted(self, tmp_path):
+        """Flask @app.route 装饰的函数，其参数应自动视为 source，
+        传入 os.system 时应报告命令注入。"""
+        p = _write_tmp(tmp_path, "flask_app.py", """
+            import flask
+            import os
+            app = flask.Flask(__name__)
 
+            @app.route('/search')
+            def search(query):
+                os.system(query)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
 
-def test_flask_route_param_sanitized_no_finding(tmp_path):
-    """Sanitized Flask route param should NOT trigger a finding."""
-    code = """
-    import os
-    import html
-    from flask import Flask
-    app = Flask(__name__)
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
 
-    @app.route('/run/<cmd>')
-    def run_safe(cmd):
-        safe_cmd = html.escape(cmd)
-        os.system(safe_cmd)
-    """
-    findings = _parse_and_track(
-        tmp_path, "flask_safe.py", code,
-        sources=["request"],
-        sinks=["os.system"],
-        sanitizers=["html.escape"],
-    )
-    assert len(findings) == 0, "Sanitized value should clear taint"
+        assert len(findings) >= 1, (
+            "@app.route 装饰的函数中，路由参数 query 应被视为 source，"
+            "传入 os.system 应产生 finding"
+        )
+        assert findings[0].sink_context == "search"
 
+    def test_flask_multiple_route_params_tainted(self, tmp_path):
+        """多个路由参数均应被标记为 tainted。"""
+        p = _write_tmp(tmp_path, "flask_multi.py", """
+            import flask
+            import os
+            app = flask.Flask(__name__)
 
-def test_flask_route_multiple_params_tainted(tmp_path):
-    """All Flask route params should be tainted, not just the first."""
-    code = """
-    import subprocess
-    from flask import Flask
-    app = Flask(__name__)
+            @app.route('/exec/<cmd>/<arg>')
+            def run_cmd(cmd, arg):
+                combined = cmd + ' ' + arg
+                os.system(combined)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
 
-    @app.route('/run/<host>/<port>')
-    def connect(host, port):
-        subprocess.run(f"{host}:{port}", shell=True)
-    """
-    findings = _parse_and_track(
-        tmp_path, "flask_multi_params.py", code,
-        sources=["request"],
-        sinks=["subprocess.run", "subprocess.*"],
-    )
-    assert len(findings) >= 1
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
 
+        assert len(findings) >= 1, "多个路由参数通过字符串拼接传入 sink 应产生 finding"
 
-def test_flask_post_route_tainted(tmp_path):
-    """Flask POST route decorator also marks params as tainted."""
-    code = """
-    import os
-    from flask import Flask
-    app = Flask(__name__)
+    def test_flask_get_method_decorator(self, tmp_path):
+        """@app.get 装饰器同样应使参数视为 source。"""
+        p = _write_tmp(tmp_path, "flask_get.py", """
+            from flask import Flask
+            import os
+            app = Flask(__name__)
 
-    @app.post('/exec')
-    def exec_cmd(cmd):
-        os.system(cmd)
-    """
-    findings = _parse_and_track(
-        tmp_path, "flask_post.py", code,
-        sources=["request"],
-        sinks=["os.system"],
-    )
-    assert len(findings) >= 1
+            @app.get('/items')
+            def get_items(item_id):
+                os.system(item_id)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
 
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
 
-# ---------------------------------------------------------------------------
-# FastAPI
-# ---------------------------------------------------------------------------
+        assert len(findings) >= 1
 
-def test_fastapi_get_route_param_tainted(tmp_path):
-    """FastAPI @app.get route param should be treated as tainted."""
-    code = """
-    import os
-    from fastapi import FastAPI
-    app = FastAPI()
+    def test_fastapi_route_params_are_tainted(self, tmp_path):
+        """FastAPI @app.get 装饰的函数参数应视为 source。"""
+        p = _write_tmp(tmp_path, "fastapi_app.py", """
+            from fastapi import FastAPI
+            import os
+            app = FastAPI()
 
-    @app.get('/run')
-    def run_cmd(cmd: str):
-        os.system(cmd)
-    """
-    findings = _parse_and_track(
-        tmp_path, "fastapi_param.py", code,
-        sources=["request"],
-        sinks=["os.system"],
-    )
-    assert len(findings) >= 1, "FastAPI route param should be tainted"
+            @app.get('/run')
+            def run_command(cmd: str):
+                os.system(cmd)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
 
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
 
-def test_fastapi_post_route_param_tainted(tmp_path):
-    """FastAPI @app.post route param propagates to sink."""
-    code = """
-    import subprocess
-    from fastapi import FastAPI
-    app = FastAPI()
+        assert len(findings) >= 1, "FastAPI 路由参数传入 os.system 应产生 finding"
 
-    @app.post('/items')
-    def create_item(name: str):
-        subprocess.run(name, shell=True)
-    """
-    findings = _parse_and_track(
-        tmp_path, "fastapi_post.py", code,
-        sources=["request"],
-        sinks=["subprocess.*"],
-    )
-    assert len(findings) >= 1
+    def test_non_route_function_params_not_auto_tainted(self, tmp_path):
+        """普通（非路由）函数的参数不应自动视为 source，传入 sink 不应误报。"""
+        p = _write_tmp(tmp_path, "plain_func.py", """
+            import os
 
+            def helper(cmd):
+                os.system(cmd)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
 
-def test_fastapi_sanitizer_blocks(tmp_path):
-    """FastAPI route param sanitized by html.escape should not trigger."""
-    code = """
-    import os
-    import html
-    from fastapi import FastAPI
-    app = FastAPI()
+        # 无 source，普通参数不应视为 tainted
+        tracker = TaintTracker(
+            sources=["request"],
+            sinks=["os.system"],
+        )
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
 
-    @app.get('/safe')
-    def safe_route(q: str):
-        safe = html.escape(q)
-        os.system(safe)
-    """
-    findings = _parse_and_track(
-        tmp_path, "fastapi_sanitized.py", code,
-        sources=["request"],
-        sinks=["os.system"],
-        sanitizers=["html.escape"],
-    )
-    assert len(findings) == 0
+        assert len(findings) == 0, "普通函数参数不应误报为 tainted"
 
 
 # ---------------------------------------------------------------------------
-# Django
+# Sanitizer clearing taint
 # ---------------------------------------------------------------------------
 
-def test_django_view_request_param_tainted(tmp_path):
-    """Django view: request.GET data flowing to sink should be detected."""
-    code = """
-    import os
+class TestSanitizerClearsTaint:
+    """净化函数应清除污点，净化后的值传入 sink 不应报警。"""
 
-    def my_view(request):
-        cmd = request.GET.get('cmd')
-        os.system(cmd)
-    """
-    findings = _parse_and_track(
-        tmp_path, "django_view.py", code,
-        sources=["request", "request.GET"],
-        sinks=["os.system"],
-    )
-    assert len(findings) >= 1
+    def test_html_escape_clears_taint(self, tmp_path):
+        """html.escape 净化后不应报警。"""
+        p = _write_tmp(tmp_path, "sanitize_html.py", """
+            import html
+            import os
 
+            def f(request):
+                user_input = request.args.get('x')
+                safe = html.escape(user_input)
+                os.system(safe)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
 
-def test_django_class_based_view(tmp_path):
-    """Django class-based view: POST data to subprocess sink."""
-    code = """
-    import subprocess
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
 
-    class MyView:
-        def post(self, request):
-            data = request.POST.get('cmd')
-            subprocess.run(data, shell=True)
-    """
-    findings = _parse_and_track(
-        tmp_path, "django_cbv.py", code,
-        sources=["request", "request.POST"],
-        sinks=["subprocess.*"],
-    )
-    assert len(findings) >= 1
+        assert len(findings) == 0, "html.escape 净化后 os.system 不应报警"
 
+    def test_html_escape_input_builtin(self, tmp_path):
+        """内置 input() 经 html.escape 净化后不应报警。"""
+        p = _write_tmp(tmp_path, "sanitize_input.py", """
+            import html
+            import os
 
-def test_django_sanitizer_clears_taint(tmp_path):
-    """Django view: bleach.clean sanitizer should clear taint."""
-    code = """
-    import os
-    import bleach
+            def main():
+                user_input = input()
+                safe = html.escape(user_input)
+                os.system(safe)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
 
-    def safe_view(request):
-        raw = request.GET.get('q')
-        clean = bleach.clean(raw)
-        os.system(clean)
-    """
-    findings = _parse_and_track(
-        tmp_path, "django_bleach.py", code,
-        sources=["request", "request.GET"],
-        sinks=["os.system"],
-        sanitizers=["bleach.clean"],
-    )
-    assert len(findings) == 0
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
+
+        assert len(findings) == 0, "input() 经 html.escape 净化后不应报警"
+
+    def test_unsanitized_input_builtin_reports(self, tmp_path):
+        """内置 input() 未经净化直接传入 sink 应报警。"""
+        p = _write_tmp(tmp_path, "unsanitized_input.py", """
+            import os
+
+            def main():
+                user_input = input()
+                os.system(user_input)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
+
+        assert len(findings) >= 1, "input() 未净化传入 os.system 应报警"
+
+    def test_partial_sanitize_still_tainted(self, tmp_path):
+        """只对部分值净化，另一部分未净化时拼接后仍应报警。"""
+        p = _write_tmp(tmp_path, "partial_sanitize.py", """
+            import html
+            import os
+
+            def f(request):
+                a = request.args.get('a')
+                b = request.args.get('b')
+                safe_a = html.escape(a)
+                cmd = safe_a + b   # b 未净化，拼接后仍 tainted
+                os.system(cmd)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
+
+        assert len(findings) >= 1, "部分净化后拼接未净化值应报警"
+
+    def test_bleach_clean_clears_taint(self, tmp_path):
+        """bleach.clean 净化后不应报警。"""
+        p = _write_tmp(tmp_path, "sanitize_bleach.py", """
+            import bleach
+            import os
+
+            def f(request):
+                user_input = request.args.get('x')
+                safe = bleach.clean(user_input)
+                os.system(safe)
+        """)
+        parser = PyASTParser(str(p))
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = make_tracker()
+        tracker.analyze_cfg(cfg, filepath=str(p))
+        findings = tracker.get_findings()
+
+        assert len(findings) == 0, "bleach.clean 净化后不应报警"
