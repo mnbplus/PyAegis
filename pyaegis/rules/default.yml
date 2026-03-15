@@ -109,6 +109,11 @@ sinks:
   - lxml.etree.fromstring
   - xml.dom.minidom.parse
   - xml.dom.minidom.parseString
+  # Common aliases: import xml.etree.ElementTree as ET -> ET.parse / ET.fromstring
+  - ET.parse
+  - ET.fromstring
+  - ET.XML
+  - ET.fromstringlist
 
   # Regex DoS
   - re.compile

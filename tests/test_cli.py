@@ -102,8 +102,11 @@ def test_ruleset_xxe_detects_et_fromstring():
             f.write('''
 import xml.etree.ElementTree as ET
 
-def parse_xml(user_input):
-    return ET.fromstring(user_input)
+from flask import request
+
+def parse_xml():
+    data = request.data
+    return ET.fromstring(data)
 ''')
 
         result = subprocess.run(

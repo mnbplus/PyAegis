@@ -677,6 +677,13 @@ class TaintTracker:
             return False
 
         if isinstance(expr, ast.Attribute):
+            # Attribute expressions can themselves be configured as sources
+            # (e.g. "request.data"). We must check this *before* recursing into
+            # the base Name; otherwise global framework objects imported into the
+            # module scope ("from flask import request") won't be recognized.
+            if self._is_source_expr(expr):
+                return True
+
             base = expr.value
             if isinstance(base, ast.Name):
                 inst_name = base.id

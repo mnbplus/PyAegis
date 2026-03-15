@@ -1,10 +1,10 @@
 {
   "precision": 1.0,
-  "recall": 0.9565,
-  "f1": 0.9778,
-  "tp": 22,
+  "recall": 1.0,
+  "f1": 1.0,
+  "tp": 23,
   "fp": 0,
-  "fn": 1,
+  "fn": 0,
   "samples": [
     {
       "label": "os.system direct injection",
@@ -136,8 +136,8 @@
       "label": "os.system via sys.argv",
       "category": "command_injection",
       "expected": 1,
-      "actual": 0,
-      "status": "FN"
+      "actual": 1,
+      "status": "TP"
     },
     {
       "label": "eval via os.getenv",
