@@ -317,17 +317,15 @@ def scan_code_string(
 
         from pyaegis.api import scan_code_string
 
-        result = scan_code_string(
-            source_code="""
-            import os
-            from flask import request
-            def view():
-                cmd = request.args.get('cmd')
-                os.system(cmd)  # SINK
-            """,
-            severity_filter=["HIGH", "CRITICAL"]
-        )
-        # result: [{"line": 6, "severity": "CRITICAL", "sink_name": "os.system", ...}]
+        code = '''
+        import os
+        from flask import request
+        def view():
+            cmd = request.args.get("cmd")
+            os.system(cmd)  # SINK
+        '''
+        result = scan_code_string(code, severity_filter=["HIGH", "CRITICAL"])
+        # result: [{"line": 5, "severity": "CRITICAL", "sink_name": "os.system", ...}]
     """
     rules_path = _resolve_rules_path(ruleset)
 
@@ -338,7 +336,11 @@ def scan_code_string(
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
             fh.write(source_code)
 
-        findings = _run_scan_on_files([tmp_path], rules_path, workers=1)
+        try:
+            findings = _run_scan_on_files([tmp_path], rules_path, workers=1)
+        except Exception:
+            # e.g. ParserError on syntax errors — return empty, don't crash caller
+            findings = []
     finally:
         try:
             os.unlink(tmp_path)
@@ -425,4 +427,12 @@ def scan_directory(
     if not py_files:
         return _format_findings([], return_format)
 
-    findings = _run_scan_on_files(py_files, rules_path,
+    findings = _run_scan_on_files(py_files, rules_path, workers=workers)
+
+    if severity_filter:
+        findings = [
+            f for f in findings
+            if _severity_passes_filter(f.severity, severity_filter)
+        ]
+
+    return _format_findings(findings, return_format)

@@ -2,480 +2,453 @@
 
 Structure of each sample:
     code              : Python source code string
-    expected_findings : int — number of HIGH/CRITICAL findings expected
+    expected_findings : int  -- number of HIGH/CRITICAL findings expected
     label             : short description
     category          : vulnerability class or 'safe' for FP traps
 """
 
 # ---------------------------------------------------------------------------
-# TRUE POSITIVE samples — real vulnerabilities, must be detected
+# TRUE POSITIVE samples -- real vulnerabilities, must be detected
 # ---------------------------------------------------------------------------
 
 VULN_SAMPLES = [
-    # ── 1. OS command injection via os.system ─────────────────────────────
     {
         "label": "os.system direct injection",
         "category": "command_injection",
         "expected_findings": 1,
-        "code": """
-import os
-from flask import request
-
-def run_cmd():
-    cmd = request.args.get('cmd')
-    os.system(cmd)
-""",
+        "code": (
+            "import os\n"
+            "from flask import request\n"
+            "def run_cmd():\n"
+            "    cmd = request.args.get('cmd')\n"
+            "    os.system(cmd)\n"
+        ),
     },
-    # ── 2. subprocess.run with shell=True (string arg) ────────────────────
     {
         "label": "subprocess.run shell=True string",
         "category": "command_injection",
         "expected_findings": 1,
-        "code": """
-import subprocess
-from flask import request
-
-def run():
-    user = request.args.get('name')
-    subprocess.run('echo ' + user, shell=True)
-""",
+        "code": (
+            "import subprocess\n"
+            "from flask import request\n"
+            "def run():\n"
+            "    user = request.args.get('name')\n"
+            "    subprocess.run('echo ' + user, shell=True)\n"
+        ),
     },
-    # ── 3. eval with user input ───────────────────────────────────────────
     {
         "label": "eval user input",
         "category": "code_execution",
         "expected_findings": 1,
-        "code": """
-from flask import request
-
-def calc():
-    expr = request.args.get('expr')
-    result = eval(expr)
-    return str(result)
-""",
+        "code": (
+            "from flask import request\n"
+            "def calc():\n"
+            "    expr = request.args.get('expr')\n"
+            "    result = eval(expr)\n"
+            "    return str(result)\n"
+        ),
     },
-    # ── 4. exec with user input ───────────────────────────────────────────
     {
         "label": "exec user input",
         "category": "code_execution",
         "expected_findings": 1,
-        "code": """
-from flask import request
-
-def run_code():
-    code = request.form.get('code')
-    exec(code)
-""",
+        "code": (
+            "from flask import request\n"
+            "def run_code():\n"
+            "    code = request.form.get('code')\n"
+            "    exec(code)\n"
+        ),
     },
-    # ── 5. SQL injection via sqlite3 raw execute ──────────────────────────
     {
         "label": "sqlite3 raw SQL injection",
         "category": "sql_injection",
         "expected_findings": 1,
-        "code": """
-import sqlite3
-from flask import request
-
-def query():
-    username = request.args.get('user')
-    conn = sqlite3.connect('db.sqlite3')
-    conn.execute("SELECT * FROM users WHERE name='" + username + "'")
-""",
+        "code": (
+            "import sqlite3\n"
+            "from flask import request\n"
+            "def query():\n"
+            "    username = request.args.get('user')\n"
+            "    conn = sqlite3.connect('db.sqlite3')\n"
+            "    conn.execute(\"SELECT * FROM users WHERE name='\" + username + \"'\")\n"
+        ),
     },
-    # ── 6. Path traversal via open() ─────────────────────────────────────
     {
         "label": "open path traversal",
         "category": "path_traversal",
         "expected_findings": 1,
-        "code": """
-from flask import request
-
-def read_file():
-    filename = request.args.get('file')
-    with open(filename, 'r') as f:
-        return f.read()
-""",
+        "code": (
+            "from flask import request\n"
+            "def read_file():\n"
+            "    filename = request.args.get('file')\n"
+            "    with open(filename, 'r') as f:\n"
+            "        return f.read()\n"
+        ),
     },
-    # ── 7. SSRF via requests.get ──────────────────────────────────────────
     {
         "label": "SSRF requests.get",
         "category": "ssrf",
         "expected_findings": 1,
-        "code": """
-import requests
-from flask import request
-
-def proxy():
-    url = request.args.get('url')
-    return requests.get(url).text
-""",
+        "code": (
+            "import requests\n"
+            "from flask import request\n"
+            "def proxy():\n"
+            "    url = request.args.get('url')\n"
+            "    return requests.get(url).text\n"
+        ),
     },
-    # ── 8. SSRF via urllib.request.urlopen ────────────────────────────────
     {
         "label": "SSRF urllib urlopen",
         "category": "ssrf",
         "expected_findings": 1,
-        "code": """
-import urllib.request
-from flask import request
-
-def fetch():
-    url = request.args.get('target')
-    urllib.request.urlopen(url)
-""",
+        "code": (
+            "import urllib.request\n"
+            "from flask import request\n"
+            "def fetch():\n"
+            "    url = request.args.get('target')\n"
+            "    urllib.request.urlopen(url)\n"
+        ),
     },
-    # ── 9. Pickle deserialization ─────────────────────────────────────────
     {
         "label": "pickle.loads deserialization",
         "category": "deserialization",
         "expected_findings": 1,
-        "code": """
-import pickle
-from flask import request
-
-def load_data():
-    blob = request.data
-    obj = pickle.loads(blob)
-    return str(obj)
-""",
+        "code": (
+            "import pickle\n"
+            "from flask import request\n"
+            "def load_data():\n"
+            "    blob = request.data\n"
+            "    obj = pickle.loads(blob)\n"
+            "    return str(obj)\n"
+        ),
     },
-    # ── 10. yaml.load unsafe ──────────────────────────────────────────────
     {
         "label": "yaml.load unsafe",
         "category": "deserialization",
         "expected_findings": 1,
-        "code": """
-import yaml
-from flask import request
-
-def parse_config():
-    data = request.data
-    return yaml.load(data)
-""",
+        "code": (
+            "import yaml\n"
+            "from flask import request\n"
+            "def parse_config():\n"
+            "    data = request.data\n"
+            "    return yaml.load(data)\n"
+        ),
     },
-    # ── 11. XXE via xml.etree.ElementTree ────────────────────────────────
     {
         "label": "XXE xml.etree.ElementTree.fromstring",
         "category": "xxe",
         "expected_findings": 1,
-        "code": """
-import xml.etree.ElementTree as ET
-from flask import request
-
-def parse_xml():
-    xml_data = request.data
-    root = ET.fromstring(xml_data)
-    return root.tag
-""",
+        "code": (
+            "import xml.etree.ElementTree as ET\n"
+            "from flask import request\n"
+            "def parse_xml():\n"
+            "    xml_data = request.data\n"
+            "    root = ET.fromstring(xml_data)\n"
+            "    return root.tag\n"
+        ),
     },
-    # ── 12. Jinja2 template injection ────────────────────────────────────
     {
         "label": "jinja2.Template SSTI",
         "category": "template_injection",
         "expected_findings": 1,
-        "code": """
-from jinja2 import Template
-from flask import request
-
-def render():
-    tmpl = request.args.get('template')
-    return Template(tmpl).render()
-""",
+        "code": (
+            "from jinja2 import Template\n"
+            "from flask import request\n"
+            "def render():\n"
+            "    tmpl = request.args.get('template')\n"
+            "    return Template(tmpl).render()\n"
+        ),
     },
-    # ── 13. os.popen command injection ───────────────────────────────────
     {
         "label": "os.popen injection",
         "category": "command_injection",
         "expected_findings": 1,
-        "code": """
-import os
-from flask import request
-
-def run():
-    q = request.args.get('q')
-    result = os.popen('grep ' + q + ' /var/log/app.log').read()
-    return result
-""",
+        "code": (
+            "import os\n"
+            "from flask import request\n"
+            "def run():\n"
+            "    q = request.args.get('q')\n"
+            "    result = os.popen('grep ' + q + ' /var/log/app.log').read()\n"
+            "    return result\n"
+        ),
     },
-    # ── 14. subprocess.Popen shell=True ──────────────────────────────────
     {
         "label": "subprocess.Popen shell=True",
         "category": "command_injection",
         "expected_findings": 1,
-        "code": """
-import subprocess
-from flask import request
-
-def run():
-    cmd = request.form.get('cmd')
-    proc = subprocess.Popen(cmd, shell=True)
-    proc.wait()
-""",
+        "code": (
+            "import subprocess\n"
+            "from flask import request\n"
+            "def run():\n"
+            "    cmd = request.form.get('cmd')\n"
+            "    proc = subprocess.Popen(cmd, shell=True)\n"
+            "    proc.wait()\n"
+        ),
     },
-    # ── 15. requests.post SSRF ────────────────────────────────────────────
     {
         "label": "SSRF requests.post",
         "category": "ssrf",
         "expected_findings": 1,
-        "code": """
-import requests
-from flask import request
-
-def webhook():
-    url = request.json.get('webhook_url')
-    requests.post(url, json={'status': 'ok'})
-""",
+        "code": (
+            "import requests\n"
+            "from flask import request\n"
+            "def webhook():\n"
+            "    url = request.json.get('webhook_url')\n"
+            "    requests.post(url, json={'status': 'ok'})\n"
+        ),
     },
-    # ── 16. pathlib.Path traversal ────────────────────────────────────────
     {
         "label": "pathlib.Path traversal",
         "category": "path_traversal",
         "expected_findings": 1,
-        "code": """
-from pathlib import Path
-from flask import request
-
-def read():
-    name = request.args.get('name')
-    return Path(name).read_text()
-""",
+        "code": (
+            "from pathlib import Path\n"
+            "from flask import request\n"
+            "def read():\n"
+            "    name = request.args.get('name')\n"
+            "    return Path(name).read_text()\n"
+        ),
     },
-    # ── 17. Django ORM raw() SQL injection ───────────────────────────────
     {
         "label": "Django ORM .raw() injection",
         "category": "sql_injection",
         "expected_findings": 1,
-        "code": """
-from django.http import HttpRequest
-
-def search(request):
-    q = request.GET.get('q')
-    results = MyModel.objects.raw('SELECT * FROM app_mymodel WHERE name=' + q)
-    return list(results)
-""",
+        "code": (
+            "from django.http import HttpRequest\n"
+            "def search(request):\n"
+            "    q = request.GET.get('q')\n"
+            "    results = MyModel.objects.raw('SELECT * FROM app WHERE name=' + q)\n"
+            "    return list(results)\n"
+        ),
     },
-    # ── 18. f-string into os.system ──────────────────────────────────────
     {
         "label": "f-string command injection",
         "category": "command_injection",
         "expected_findings": 1,
-        "code": """
-import os
-from flask import request
-
-def ping():
-    host = request.args.get('host')
-    os.system(f'ping -c 1 {host}')
-""",
+        "code": (
+            "import os\n"
+            "from flask import request\n"
+            "def ping():\n"
+            "    host = request.args.get('host')\n"
+            "    os.system(f'ping -c 1 {host}')\n"
+        ),
     },
-    # ── 19. sys.argv into eval ────────────────────────────────────────────
     {
         "label": "sys.argv into eval",
         "category": "code_execution",
         "expected_findings": 1,
-        "code": """
-import sys
-
-def main():
-    expr = sys.argv[1]
-    result = eval(expr)
-    print(result)
-""",
+        "code": (
+            "import sys\n"
+            "def main():\n"
+            "    expr = sys.argv[1]\n"
+            "    result = eval(expr)\n"
+            "    print(result)\n"
+        ),
     },
-    # ── 20. input() into exec ─────────────────────────────────────────────
     {
         "label": "input() into exec",
         "category": "code_execution",
         "expected_findings": 1,
-        "code": """
-def run():
-    code = input('Enter code: ')
-    exec(code)
-""",
+        "code": (
+            "def run():\n"
+            "    code = input('Enter code: ')\n"
+            "    exec(code)\n"
+        ),
     },
-    # ── 21. shutil.rmtree path traversal ─────────────────────────────────
     {
         "label": "shutil.rmtree path traversal",
         "category": "path_traversal",
         "expected_findings": 1,
-        "code": """
-import shutil
-from flask import request
-
-def cleanup():
-    path = request.args.get('path')
-    shutil.rmtree(path)
-""",
+        "code": (
+            "import shutil\n"
+            "from flask import request\n"
+            "def cleanup():\n"
+            "    path = request.args.get('path')\n"
+            "    shutil.rmtree(path)\n"
+        ),
     },
-    # ── 22. jsonpickle.decode deserialization ─────────────────────────────
     {
         "label": "jsonpickle.decode deserialization",
         "category": "deserialization",
         "expected_findings": 1,
-        "code": """
-import jsonpickle
-from flask import request
-
-def load():
-    data = request.data
-    obj = jsonpickle.decode(data)
-    return str(obj)
-""",
+        "code": (
+            "import jsonpickle\n"
+            "from flask import request\n"
+            "def load():\n"
+            "    data = request.data\n"
+            "    obj = jsonpickle.decode(data)\n"
+            "    return str(obj)\n"
+        ),
     },
-    # ── 23. httpx.get SSRF ────────────────────────────────────────────────
     {
         "label": "SSRF httpx.get",
         "category": "ssrf",
         "expected_findings": 1,
-        "code": """
-import httpx
-from flask import request
-
-def fetch():
-    url = request.args.get('url')
-    return httpx.get(url).text
-""",
+        "code": (
+            "import httpx\n"
+            "from flask import request\n"
+            "def fetch():\n"
+            "    url = request.args.get('url')\n"
+            "    return httpx.get(url).text\n"
+        ),
     },
 ]
 
 # ---------------------------------------------------------------------------
-# FALSE POSITIVE TRAP samples — safe code, must NOT be flagged HIGH/CRITICAL
+# FALSE POSITIVE TRAP samples -- safe code, must NOT be flagged HIGH/CRITICAL
 # ---------------------------------------------------------------------------
 
 SAFE_SAMPLES = [
-    # ── FP-1. subprocess.run with safe list arg (no shell=True) ──────────
     {
-        "label": "subprocess.run list no shell — safe",
+        "label": "subprocess.run list no shell -- safe",
         "category": "safe",
         "expected_findings": 0,
-        "code": """
-import subprocess
-from flask import request
+        "code": (
+            "import subprocess\n"
+            "from flask import request\n"
+            "def run():\n"
+            "    user = request.args.get('name')\n"
+            "    subprocess.run(['ls', '-la', '/tmp'], shell=False)\n"
+        ),
+    },
+    {
+        "label": "html.escape sanitizer blocks sink -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import os\n"
+            "import html\n"
+            "from flask import request\n"
+            "def run():\n"
+            "    user = request.args.get('cmd')\n"
+            "    safe = html.escape(user)\n"
+            "    os.system(safe)\n"
+        ),
+    },
+    {
+        "label": "os.path.abspath sanitizes open -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import os\n"
+            "from flask import request\n"
+            "def read():\n"
+            "    raw = request.args.get('file')\n"
+            "    safe_path = os.path.abspath(raw)\n"
+            "    with open(safe_path, 'r') as f:\n"
+            "        return f.read()\n"
+        ),
+    },
+    {
+        "label": "eval with constant string -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "def compute():\n"
+            "    result = eval('1 + 2 + 3')\n"
+            "    return result\n"
+        ),
+    },
+    {
+        "label": "subprocess.run static list shell=True -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import subprocess\n"
+            "def deploy():\n"
+            "    subprocess.run(['git', 'pull', '--rebase'], shell=True)\n"
+        ),
+    },
+    {
+        "label": "yaml.safe_load -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import yaml\n"
+            "from flask import request\n"
+            "def parse():\n"
+            "    data = request.data\n"
+            "    return yaml.safe_load(data)\n"
+        ),
+    },
+    {
+        "label": "requests.get with constant URL -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import requests\n"
+            "def health_check():\n"
+            "    return requests.get('https://api.internal/health').json()\n"
+        ),
+    },
+    {
+        "label": "open with constant path -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "def read_config():\n"
+            "    with open('/etc/app/config.json', 'r') as f:\n"
+            "        return f.read()\n"
+        ),
+    },
+    {
+        "label": "sqlite3 parameterized query -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import sqlite3\n"
+            "from flask import request\n"
+            "def query():\n"
+            "    username = request.args.get('user')\n"
+            "    conn = sqlite3.connect('db.sqlite3')\n"
+            "    conn.execute('SELECT * FROM users WHERE name=?', (username,))\n"
+        ),
+    },
+    {
+        "label": "no user input no taint -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import os\n"
+            "def cleanup():\n"
+            "    os.system('rm -f /tmp/cache.lock')\n"
+        ),
+    },
+    {
+        "label": "re.compile with constant pattern -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "import re\n"
+            "from flask import request\n"
+            "def validate():\n"
+            "    value = request.args.get('email')\n"
+            "    pattern = re.compile(r'^[\\w.+-]+@[\\w-]+\\.[\\w.]+$')\n"
+            "    return bool(pattern.match(value))\n"
+        ),
+    },
+    {
+        "label": "pathlib.Path.resolve sanitizes traversal -- safe",
+        "category": "safe",
+        "expected_findings": 0,
+        "code": (
+            "from pathlib import Path\n"
+            "from flask import request\n"
+            "def read():\n"
+            "    name = request.args.get('name')\n"
+            "    safe = Path(name).resolve()\n"
+            "    return safe.read_text()\n"
+        ),
+    },
+]
 
-def run():
-    user = request.args.get('name')
-    subprocess.run(['ls', '-la', '/tmp'], shell=False)
-""",
-    },
-    # ── FP-2. html.escape sanitizer blocks os.system ─────────────────────
-    {
-        "label": "html.escape sanitizer blocks sink — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-import os
-import html
-from flask import request
+# ---------------------------------------------------------------------------
+# Combined corpus exposed to benchmark tests
+# ---------------------------------------------------------------------------
 
-def run():
-    user = request.args.get('cmd')
-    safe = html.escape(user)
-    os.system(safe)
-""",
-    },
-    # ── FP-3. os.path.abspath sanitizes path traversal ───────────────────
-    {
-        "label": "os.path.abspath sanitizes open — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-import os
-from flask import request
+CORPUS = VULN_SAMPLES + SAFE_SAMPLES
 
-def read():
-    raw = request.args.get('file')
-    safe_path = os.path.abspath(raw)
-    with open(safe_path, 'r') as f:
-        return f.read()
-""",
-    },
-    # ── FP-4. Constant string passed to eval ─────────────────────────────
-    {
-        "label": "eval with constant string — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-def compute():
-    result = eval('1 + 2 + 3')
-    return result
-""",
-    },
-    # ── FP-5. subprocess.run list with shell=True — list arg, no string taint
-    {
-        "label": "subprocess.run static list shell=True — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-import subprocess
-
-def deploy():
-    subprocess.run(['git', 'pull', '--rebase'], shell=True)
-""",
-    },
-    # ── FP-6. yaml.safe_load (not yaml.load) ─────────────────────────────
-    {
-        "label": "yaml.safe_load — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-import yaml
-from flask import request
-
-def parse():
-    data = request.data
-    return yaml.safe_load(data)
-""",
-    },
-    # ── FP-7. Hard-coded URL for requests.get ────────────────────────────
-    {
-        "label": "requests.get with constant URL — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-import requests
-
-def health_check():
-    return requests.get('https://api.internal/health').json()
-""",
-    },
-    # ── FP-8. open() with hard-coded path ────────────────────────────────
-    {
-        "label": "open with constant path — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-def read_config():
-    with open('/etc/app/config.json', 'r') as f:
-        return f.read()
-""",
-    },
-    # ── FP-9. sqlite3 with parameterized query ────────────────────────────
-    {
-        "label": "sqlite3 parameterized query — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-import sqlite3
-from flask import request
-
-def query():
-    username = request.args.get('user')
-    conn = sqlite3.connect('db.sqlite3')
-    conn.execute('SELECT * FROM users WHERE name=?', (username,))
-""",
-    },
-    # ── FP-10. No user input reaches sink at all ──────────────────────────
-    {
-        "label": "no user input, no taint — safe",
-        "category": "safe",
-        "expected_findings": 0,
-        "code": """
-import os
-
-def cleanup():
-    os.system('rm -f /tmp/cache.lock')
-""",
-    },
-    # ── FP-11. re.compile with constant pattern ───────────────────────────
-    {
-        "label": "re.compile with
+# Sanity assertions (fail fast on import if corpus is malformed)
+assert len(VULN_SAMPLES) >= 20, f"Need >= 20 vuln samples, got {len(VULN_SAMPLES)}"
+assert len(SAFE_SAMPLES) >= 10, f"Need >= 10 safe samples, got {len(SAFE_SAMPLES)}"
+assert all("expected_findings" in s for s in CORPUS), "Every sample needs expected_findings"
+assert all("code" in s for s in CORPUS), "Every sample needs code"
