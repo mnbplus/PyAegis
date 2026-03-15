@@ -15,12 +15,13 @@ from __future__ import annotations
 import ast
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
 class FunctionSymbol:
     """A globally discoverable top-level function."""
+
     name: str
     qualname: str
     file_path: str
@@ -37,6 +38,19 @@ class GlobalSymbolTable:
         self._by_name: Dict[str, List[FunctionSymbol]] = {}
         self._by_file: Dict[str, Dict[str, FunctionSymbol]] = {}
         self._module_by_file: Dict[str, str] = {}
+        # Backward-compat: import alias index by file (string path -> {local: qualname}).
+        # Stored for both the raw path passed to register_file() and its abspath.
+        self._imports_by_file: Dict[str, Dict[str, str]] = {}
+
+    @property
+    def functions(self) -> Dict[str, FunctionSymbol]:
+        """Backward-compatible view: mapping qualname -> FunctionSymbol."""
+        return self._by_qualname
+
+    @property
+    def imports(self) -> Dict[str, Dict[str, str]]:
+        """Backward-compatible view: mapping file_path -> {local_name -> qualname}."""
+        return self._imports_by_file
 
     @staticmethod
     def _module_name_for_file(file_path: str, *, root_dir: str) -> str:
@@ -53,7 +67,9 @@ class GlobalSymbolTable:
         parts = [p for p in rel.split("/") if p and p not in (".", "..")]
         if parts and parts[-1] == "__init__":
             parts = parts[:-1]
-        mod = ".".join(parts) if parts else os.path.splitext(os.path.basename(abspath))[0]
+        mod = (
+            ".".join(parts) if parts else os.path.splitext(os.path.basename(abspath))[0]
+        )
         return mod.strip(".")
 
     @classmethod
@@ -93,10 +109,30 @@ class GlobalSymbolTable:
         """Register a parsed AST Module into the symbol table."""
         if not isinstance(tree, ast.AST):
             return
+        # Keep both the original filepath key and its abspath for backward compat.
+        raw_fp = filepath
         abspath = os.path.abspath(filepath)
         mod = self._module_name_for_file(abspath, root_dir=self.root_dir)
         self._module_by_file[abspath] = mod
         self._by_file.setdefault(abspath, {})
+
+        # Record import aliases for this file (for legacy tests / debug).
+        imports_map: Dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    local = alias.asname or alias.name.split(".")[-1]
+                    imports_map[local] = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                modname = node.module or ""
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    local = alias.asname or alias.name
+                    full = f"{modname}.{alias.name}" if modname else alias.name
+                    imports_map[local] = full
+        self._imports_by_file[raw_fp] = dict(imports_map)
+        self._imports_by_file[abspath] = dict(imports_map)
 
         # Register only top-level function defs.
         body = getattr(tree, "body", None) or []
@@ -196,7 +232,9 @@ class InterproceduralTaintTracker:
                 return f"{module_aliases[head]}.{rest}"
         return raw
 
-    def resolve_symbol(self, call: ast.Call, *, caller_file: str) -> Optional[FunctionSymbol]:
+    def resolve_symbol(
+        self, call: ast.Call, *, caller_file: str
+    ) -> Optional[FunctionSymbol]:
         qn = self.resolve_call_qualname(call, caller_file=caller_file)
         if not qn:
             return None
@@ -209,6 +247,7 @@ class InterproceduralTaintTracker:
             if len(cands) == 1:
                 return cands[0]
         return None
+
 
 # Alias for backward compat
 InterproceduralAnalyzer = InterproceduralTaintTracker
