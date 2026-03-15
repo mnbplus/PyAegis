@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyaegis"
-version = "0.1.0"
+version = "0.2.0"
 description = "Advanced Python Static Application Security Testing (SAST) Engine"
 readme = "README.md"
 authors = [

@@ -1,13 +1,189 @@
+# PyAegis default rule set
+#
+# This file is intentionally "flat" (lists of patterns) so the engine can stay
+# lightweight. It supports exact match and glob patterns (fnmatch), e.g.
+#   - subprocess.*
+#   - xml.etree.ElementTree.*
+#
+# Terminology:
+# - inputs: untrusted sources
+# - sinks: dangerous call targets
+# - sanitizers: known cleaning/encoding functions (stop taint)
+#
+# NOTE: These are heuristic rules for SAST, not a guarantee of safety.
+
 inputs:
+  # Builtins / env / cli
   - input
-  - request
-  - os.getenv
   - sys.argv
+  - os.getenv
+  - os.environ.get
+  - environ.get
+
+  # Flask / Werkzeug request
+  - flask.request
+  - request
+  - request.args
+  - request.form
+  - request.values
+  - request.data
+  - request.json
+  - request.get_json
+  - request.headers
+  - request.cookies
+  - request.files
+  - request.view_args
+  - request.get_data
+
+  # Django HttpRequest
+  - django.http.request.HttpRequest
+  - request.GET
+  - request.POST
+  - request.COOKIES
+  - request.FILES
+  - request.headers
+  - request.body
+  - request.META
+
+  # FastAPI / Starlette Request
+  - starlette.requests.Request
+  - fastapi.Request
+  - request.query_params
+  - request.path_params
+  - request.headers
+  - request.cookies
+  - request.state
+  - request.json
+  - request.form
+  - request.body
+
+  # Web frameworks (generic)
+  - web.input
+  - cgi.FieldStorage
+
+  # Common libraries / parsing
+  - json.loads
+  - ujson.loads
+  - orjson.loads
+
+  # XML from user-controlled strings
+  - xmltodict.parse
+
 sinks:
+  # Code execution
   - eval
   - exec
+  - compile
+  - builtins.eval
+  - builtins.exec
+  - runpy.run_module
+  - runpy.run_path
+
+  # OS command execution
   - os.system
   - os.popen
-  - subprocess.Popen
+  - os.spawn*
   - subprocess.call
-  - sqlite3.connect().execute
+  - subprocess.run
+  - subprocess.Popen
+  - subprocess.*
+  - commands.getoutput
+
+  # Template injection / dangerous rendering
+  - jinja2.Template
+  - jinja2.Environment.from_string
+  - mako.template.Template
+
+  # Deserialization
+  - pickle.loads
+  - pickle.load
+  - cPickle.loads
+  - dill.loads
+  - marshal.loads
+  - yaml.load
+  - yaml.unsafe_load
+  - ruamel.yaml.load
+  - jsonpickle.decode
+
+  # SSRF / URL fetch
+  - urllib.request.urlopen
+  - urllib3.PoolManager.request
+  - urllib3.request
+  - requests.get
+  - requests.post
+  - requests.request
+  - httpx.get
+  - httpx.post
+  - httpx.request
+  - aiohttp.ClientSession.get
+  - aiohttp.ClientSession.post
+  - aiohttp.ClientSession.request
+  - socket.create_connection
+
+  # Path traversal / file ops
+  - open
+  - builtins.open
+  - os.open
+  - os.remove
+  - os.unlink
+  - os.rmdir
+  - os.rename
+  - os.replace
+  - os.mkdir
+  - os.makedirs
+  - shutil.copy
+  - shutil.copyfile
+  - shutil.copytree
+  - shutil.move
+  - shutil.rmtree
+  - pathlib.Path
+  - pathlib.Path.open
+  - pathlib.Path.write_text
+  - pathlib.Path.write_bytes
+  - tempfile.NamedTemporaryFile
+
+  # SQL injection (common entrypoints)
+  - sqlite3.connect
+  - sqlite3.Connection.execute
+  - sqlite3.Cursor.execute
+  - sqlite3.Cursor.executemany
+  - psycopg2.connect
+  - psycopg2.cursor.execute
+  - MySQLdb.connect
+  - pymysql.connect
+  - sqlalchemy.text
+
+  # XXE / XML parsing with entities
+  - xml.etree.ElementTree.parse
+  - xml.etree.ElementTree.fromstring
+  - lxml.etree.parse
+  - lxml.etree.fromstring
+  - xml.dom.minidom.parse
+  - xml.dom.minidom.parseString
+
+  # Regex DoS-ish sinks
+  - re.compile
+  - re.match
+  - re.search
+
+sanitizers:
+  # HTML / XSS
+  - html.escape
+  - markupsafe.escape
+  - bleach.clean
+  - django.utils.html.escape
+  - flask.escape
+  - xml.sax.saxutils.escape
+
+  # Path traversal hardening
+  - os.path.abspath
+  - os.path.normpath
+  - pathlib.Path.resolve
+
+  # SQL parameterization helpers (heuristic)
+  - sqlite3.Connection.execute
+  - sqlite3.Cursor.execute
+
+  # URL validation (heuristic)
+  - urllib.parse.urlparse
+  - validators.url
