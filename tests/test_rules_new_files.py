@@ -80,6 +80,22 @@ def test_rules_deserialization_pickle_loads(tmp_path):
     assert findings[0].sink_name == "pickle.loads"
 
 
+def test_rules_deserialization_yaml_load_without_loader(tmp_path):
+    findings = _run_with_rules(
+        tmp_path,
+        """
+        import yaml
+
+        def f(request):
+            s = request.data
+            yaml.load(s)
+        """,
+        "deserialization.yml",
+    )
+    assert len(findings) == 1
+    assert findings[0].sink_name == "yaml.load"
+
+
 def test_rules_path_traversal_open(tmp_path):
     findings = _run_with_rules(
         tmp_path,
