@@ -79,6 +79,13 @@ dmypy.json
 .pyaegis_cache.sqlite
 .pyaegis_cache.pkl
 
+# local scratch scripts
+pv.py
+decode.py
+fix.py
+fixb.py
+fixc.py
+
 out.txt
 gha_output.txt
 *.txt
