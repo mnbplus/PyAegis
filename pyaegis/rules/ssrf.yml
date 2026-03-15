@@ -1,0 +1,20 @@
+# Focused ruleset: SSRF
+
+inputs:
+  - request
+  - request.args
+  - request.query_params
+
+sinks:
+  - requests.get
+  - requests.post
+  - requests.request
+  - httpx.get
+  - httpx.post
+  - httpx.request
+  - urllib.request.urlopen
+  - socket.create_connection
+
+sanitizers:
+  - urllib.parse.urlparse
+  - validators.url

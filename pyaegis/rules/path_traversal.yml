@@ -1,0 +1,19 @@
+# Focused ruleset: path traversal / unsafe file ops
+
+inputs:
+  - request
+  - request.GET
+  - request.POST
+  - request.args
+
+sinks:
+  - open
+  - builtins.open
+  - pathlib.Path
+  - pathlib.Path.open
+  - os.open
+
+sanitizers:
+  - os.path.abspath
+  - os.path.normpath
+  - pathlib.Path.resolve

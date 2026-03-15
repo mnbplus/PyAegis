@@ -1,0 +1,20 @@
+# Focused ruleset: insecure deserialization
+
+inputs:
+  - request
+  - request.data
+  - request.get_data
+  - request.body
+  - request.cookies
+
+sinks:
+  - pickle.loads
+  - pickle.load
+  - yaml.load
+  - yaml.unsafe_load
+  - ruamel.yaml.load
+  - jsonpickle.decode
+  - dill.loads
+  - marshal.loads
+
+sanitizers: []

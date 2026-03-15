@@ -1,0 +1,25 @@
+# Focused ruleset: XXE / XML parsing
+#
+# This file is used by tests to ensure per-vuln rules can be shipped as
+# standalone YAMLs (in addition to default.yml).
+
+inputs:
+  - request
+  - request.get_data
+  - request.data
+  - request.body
+
+sinks:
+  # Keep patterns flexible: import aliases (e.g. ET.fromstring) will appear as
+  # "<alias>.fromstring" in the AST name resolver.
+  - "*.fromstring"
+  - "*.parse"
+  # Common fully-qualified sinks (when not imported as alias)
+  - xml.etree.ElementTree.fromstring
+  - xml.etree.ElementTree.parse
+  - lxml.etree.fromstring
+  - lxml.etree.parse
+  - xml.dom.minidom.parse
+  - xml.dom.minidom.parseString
+
+sanitizers: []
