@@ -1,48 +1,19 @@
-<!-- PROGRESS_LOG.md: append-only, do not edit manually -->
+<!-- 此文件由 PyAegis 自动维护，记录每轮进度 -->
 
----
-
-## 2026-03-15 23:05 (Asia/Shanghai)
+## 2026-03-15 23:55 (Asia/Shanghai)
 
 ### 完成内容
-- `af0beea` fix: restore GlobalSymbolTable legacy attributes & import indexing（P0 API alignment，全测试绿灯）
-- `ff55ad4` feat: LLMRemediationEngine — AI 自动生成 unified diff 修复建议（136 passed, 4 skipped）
-- `aadea4e` feat(p0): 跨模块污点追踪通过 import_map 连通（+3 新测试，零回归）
-- `6919906` docs: 日文 README 完整翻译
-- `2652319` chore: update progress log, remove stray script
-- P2 conditional_sinks `arg_type: string` 条件支持实现并测试通过
-- CLI 补全 `--format` / `--output` 参数，新增 `pyaegis/__main__.py`
-
-### 正在进行
-- `aegis-next`（52c39385，codex-high）：正在推进 P1 FastAPI Depends source 自动发现，当前在读取 cli.py 代码
-- `aegis-readme-sync-full`（ce98e90c，claude）：正在用 Python 脚本生成完整版中日文 README（之前版本被截断）
+- **feat(p1): taint FastAPI Depends params** (`34ff1b4`) — parser.py 增加 Depends 参数识别（含 import alias），taint.py 将 source_params 作为 taint 入口；新增测试 `tests/test_fastapi_depends_sources.py`，pytest 全绿（4 skipped 维持）
+- **docs: complete Japanese README** (`2f2e395`) — README.ja.md 完整重写，全章节与英文版对齐
+- **docs: polish homepage** (`e83747e`) — 英文 README 优化：emoji flags、pitch 精炼、Why PyAegis 章节、demo 占位、Topics 引导；+28/-54 行
+- **docs: complete ja and zh-CN README sync** (`6e6d2e0`) — README.ja.md (36KB) 与 README.zh-CN.md (15KB) 完整同步，临时 parts/ 目录已删除
 
 ### 遇到问题
-- 两个早期会话（aegis-interprocedural-v2、aegis-llm-remediation）因 hajimi-plus rate limit 429 失败，均由后续轮次补回，无永久损失
-- aegis-readme 之前中文版仅 5KB（被截断），日文版也缺章节，本轮用 claude 重写修复
-- PRODUCT_RESEARCH.md 不存在，aegis-next 直接从代码读起
+- `aegis-readme-sync-full` 两个实例（ce98e90、a6a24fa1）均为空输出，疑似 model 分配问题（qwen3.5-397b-a17b-thinking），未产生实质工作；后续由 aegis-next 补齐
+- `ja-readme` agent 截断在 2041 bytes，需后续 agent 重新生成完整版（已由 aegis-next 修复）
 
 ### 下一步
-- 等待 aegis-next 完成 FastAPI Depends P1 实现并 push
-- 等待 aegis-readme-sync-full 完成完整版 README commit+push
-- 后续考虑：baseline/suppression 支持（忽略已知发现）、Django ORM source 扩展
-
----
-
-## 2026-03-15 23:10 (Asia/Shanghai)
-
-### 完成内容
-- 同上轮（af0beea 为 GitHub 远端最新 commit，14:54 UTC push 成功）
-- 历史已完成 agents：aegis-next×3（P2 arg_type、P0 API fix、inter-procedural taint）、aegis-llm-remediation、aegis-interprocedural-v2 全部完成并 commit/push
-
-### 正在进行
-- `aegis-next`（52c39385）：仍在执行，最新动作为读取 cli.py offset=420（P1 FastAPI Depends 调研中）
-- `aegis-readme-sync-full`（ce98e90c）：仍在执行，最新动作为读取 README.zh-CN.md offset=1
-
-### 遇到问题
-- 无新阻塞；两个活跃 agent 均正常运行中
-- PRODUCT_RESEARCH.md 尚不存在（agents 直接读代码绕过）
-
-### 下一步
-- 无需 spawn 新 agent（2 个活跃）
-- 待 P1 FastAPI Depends 完成后，考虑创建 PRODUCT_RESEARCH.md 记录产品调研结论
+- 继续推进 P2 项：SARIF 输出完善（CWE 映射扩充）
+- 补充 `docs/usage.md` 和 `docs/comparison.md`（当前为占位链接）
+- `docs/images/demo.gif` 尚为占位，考虑用 asciinema + agg 生成真实录屏
+- 关注仓库中未跟踪文件（check2.py、demo/ 等），评估是否纳入版本控制
