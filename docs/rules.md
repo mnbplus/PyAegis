@@ -7,6 +7,24 @@ PyAegis rules are intentionally minimal: a rule file defines **sources** and **s
 
 PyAegis reports a finding when a variable assigned from a **source call** is later passed into a **sink call**.
 
+## Bundled rulesets
+
+PyAegis ships with multiple curated ruleset files under `pyaegis/rules/` (for example: `default.yml`, `ssrf.yml`, `xxe.yml`, `deserialization.yml`, `path_traversal.yml`).
+
+You can select a bundled ruleset by name:
+
+```bash
+pyaegis scan . --ruleset ssrf
+```
+
+List all bundled rulesets:
+
+```bash
+pyaegis scan --list-rulesets
+```
+
+`--rules` still accepts a custom YAML path and takes precedence over `--ruleset`.
+
 ## Rule file structure
 
 A rules file is YAML with two top-level keys:

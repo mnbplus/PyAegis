@@ -820,7 +820,13 @@ def _cmd_fix(args: argparse.Namespace) -> int:
         return 1
 
     use_color = not getattr(args, "no_color", False)
-    rules_path = getattr(args, "rules", None) or _default_rules_path()
+    try:
+        rules_path = _resolve_rules_path(
+            getattr(args, "rules", None), getattr(args, "ruleset", None)
+        )
+    except ValueError as e:
+        sys.stderr.write(str(e) + "\n")
+        return 2
 
     try:
         _, findings = _run_taint_scan(

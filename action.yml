@@ -1,0 +1,57 @@
+name: 'PyAegis SAST'
+description: 'Python-first SAST with taint analysis and AI auto-fix. Lower false positives than Bandit.'
+author: 'mnbplus'
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  target:
+    description: 'Path to scan (default: current directory)'
+    required: false
+    default: '.'
+  format:
+    description: 'Output format: text, json, sarif'
+    required: false
+    default: 'sarif'
+  output:
+    description: 'Output file path'
+    required: false
+    default: 'pyaegis.sarif'
+  severity:
+    description: 'Minimum severity: LOW, MEDIUM, HIGH, CRITICAL'
+    required: false
+    default: ''
+  rules:
+    description: 'Custom rules file path'
+    required: false
+    default: ''
+  fail_on_findings:
+    description: 'Fail the action if findings are detected'
+    required: false
+    default: 'false'
+
+outputs:
+  sarif_file:
+    description: 'Path to the generated SARIF file'
+    value: ${{ steps.scan.outputs.sarif_file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install PyAegis
+      shell: bash
+      run: pip install pyaegis
+
+    - name: Run PyAegis scan
+      id: scan
+      shell: bash
+      run: |
+        ARGS="${{ inputs.target }}"
+        ARGS="$ARGS --format ${{ inputs.format }}"
+        ARGS="$ARGS --output ${{ inputs.output }}"
+        [ -n "${{ inputs.severity }}" ] && ARGS="$ARGS --severity ${{ inputs.severity }}"
+        [ -n "${{ inputs.rules }}" ] && ARGS="$ARGS --rules ${{ inputs.rules }}"
+        pyaegis $ARGS || ${{ inputs.fail_on_findings }}
+        echo "sarif_file=${{ inputs.output }}" >> $GITHUB_OUTPUT

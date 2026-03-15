@@ -91,3 +91,26 @@
 - spawn aegis-next 继续优化最紧迫功能（读 PRODUCT_RESEARCH.md 后决定方向）
 - 用户需手动启用 GitHub Code Scanning 解除 Dogfood CI 错误
 - 待补充：docs/usage.md 实质内容、demo.gif 真实录屏（asciinema + agg）
+
+## 2026-03-16 00:30 — 五分钟定时报告
+
+### 完成内容
+- aegis-refactor(9c4d5006) ✅ 框架感知逻辑解耦到 pyaegis/frameworks/ 插件系统（Flask/FastAPI modeler + registry），openai 移为可选依赖 pip install pyaegis[ai]（commit d93683a）
+- aegis-next(cd7c6ead) ✅ 修复 cli.py 中 remediate --apply 崩溃：实现 _apply_diff_to_file() unified diff 应用器，补全 --ruleset 解析与 --list-rulesets 输出（commit d2c0622）
+- GitHub 最新 HEAD：29f602a feat: add SARIF snippets in results
+
+### 遇到问题
+- 无新增阻塞问题
+- GitHub Code Scanning (Dogfood CI) 仍需用户手动在仓库 Settings 启用
+
+## 2026-03-16 00:45 (Asia/Shanghai)
+
+### 完成内容
+- **feat(cli): add ruleset selection + listing** — scan/remediate/fix 支持 `--ruleset` 并新增 `--list-rulesets`，当 ruleset 不存在时给出可用列表提示
+- **docs: ruleset usage** — docs/rules.md 补充 ruleset 使用与列出命令说明
+
+### 测试
+- `pytest tests/test_cli.py -q`
+
+### 下一步
+- 可补充 CLI 测试覆盖 ruleset 分支（含未知 ruleset 错误提示）
