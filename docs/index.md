@@ -1,12 +1,48 @@
-# Welcome to PyAegis
+# PyAegis Documentation
 
-PyAegis is an Advanced Python Static Application Security Testing (SAST) Engine, utilizing true AST multiprocess parsing and Control-Flow Graph Taint Analysis.
+PyAegis is a Python-first **Static Application Security Testing (SAST)** tool focused on **source → sink** security checks.
 
-## Why PyAegis?
-Typical regex-based tools struggle with contextual false-positives. PyAegis understands how data flows from dangerous **Sources** (user input) into vulnerable **Sinks** (system executions).
+Unlike regex-based scanners, PyAegis parses code into an **AST**, builds a lightweight per-function model, and performs taint-style analysis to answer a practical question:
 
-## Installation
+> Can **untrusted input** reach a **dangerous API**?
 
-```bash
-pip install pyaegis
-```
+## Who is this for?
+
+- Application Security / DevSecOps teams who want a CI gate for Python repositories
+- Developers who want quick, explainable findings (with file/line/context)
+- Contributors who want a small codebase that’s easy to extend
+
+## What PyAegis detects (today)
+
+PyAegis ships with a simple default ruleset (YAML) that models:
+
+- **Sources** (`inputs`): `input`, `request`, `os.getenv`, `sys.argv`, ...
+- **Sinks** (`sinks`): `eval`, `exec`, `os.system`, `subprocess.*`, ...
+
+This enables detection of common injection-style issues where tainted data is passed into an execution sink.
+
+## Get started
+
+- [Quickstart](quickstart.md) — install + scan in 5 minutes
+- [Rules](rules.md) — define sources/sinks and create custom rules
+- [CI integration](ci-integration.md) — GitHub Actions / GitLab CI / Jenkins examples
+- [Comparison](comparison.md) — how PyAegis compares to Bandit and Semgrep
+- [FAQ](faq.md)
+
+## Core concepts
+
+- **Source**: an entry point of untrusted data (user input, request params, env vars, CLI args)
+- **Sink**: a sensitive operation where tainted data is dangerous (command execution, dynamic eval, deserialization, SQL execution)
+- **Finding**: a reported issue with rule id, location, severity, and context
+
+## Output formats
+
+PyAegis supports:
+
+- `text` — human-readable terminal output
+- `json` — easy to consume by scripts
+- `sarif` — integrates with code scanning platforms (e.g., GitHub Advanced Security)
+
+---
+
+Tip: If you’re new, start with **Quickstart**, then read **Rules** and **CI integration**.

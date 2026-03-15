@@ -2,20 +2,29 @@ site_name: PyAegis Documentation
 site_description: Advanced Python Static Application Security Testing (SAST) Engine
 site_author: PyAegis Team
 
+repo_name: mnbplus/PyAegis
+repo_url: https://github.com/mnbplus/PyAegis
+
 theme:
   name: material
   palette:
     scheme: slate
   features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
     - search.suggest
     - search.highlight
     - content.code.copy
 
 nav:
   - Home: index.md
-  - Usage Example: usage.md
-  - Architecture: architecture.md
-  - Writing Rules: rules.md
+  - Quickstart: quickstart.md
+  - Rules:
+      - Writing rules: rules.md
+  - CI/CD integration: ci-integration.md
+  - Comparison: comparison.md
+  - FAQ: faq.md
 
 markdown_extensions:
   - admonition

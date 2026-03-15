@@ -1,210 +1,207 @@
 <div align="center">
-  <!-- Slogan and Shield -->
-  <h1>🛡️ PyAegis</h1>
-  <p><b>The Next-Generation Static Application Security Testing (SAST) Engine for Python Codebases.</b></p>
-  <br>
-  [![Python Supported](https://img.shields.io/badge/Python-3.8%20|%203.9%20|%203.10%20|%203.11%20|%203.12-blue.svg?style=for-the-badge&logo=python)](https://python.org)
-  [![Build Status](https://img.shields.io/github/actions/workflow/status/mnbplus/PyAegis/ci.yml?branch=main&style=for-the-badge&logo=github)](https://github.com/mnbplus/PyAegis/actions)
-  [![codecov](https://img.shields.io/codecov/c/github/mnbplus/PyAegis?style=for-the-badge&logo=codecov)](https://codecov.io/gh/mnbplus/PyAegis)
-  [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-  [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge)](https://github.com/psf/black)
-  [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge)](http://makeapullrequest.com)
-  [![Security Scanned](https://img.shields.io/badge/Security-Scanned_by_PyAegis-red.svg?style=for-the-badge)](#)
+  <h1>PyAegis</h1>
+  <p><b>The next-generation Static Application Security Testing (SAST) engine for Python codebases.</b></p>
+
+  <p>
+    <a href="README.md">English</a> |
+    <a href="README.zh-CN.md">简体中文</a> |
+    <a href="README.ja.md">日本語</a>
+  </p>
+
+  <p>
+    <a href="https://python.org"><img alt="Python Supported" src="https://img.shields.io/badge/Python-3.8%20|%203.9%20|%203.10%20|%203.11%20|%203.12-blue.svg?style=for-the-badge&logo=python"></a>
+    <a href="https://github.com/mnbplus/PyAegis/actions"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/mnbplus/PyAegis/ci.yml?branch=main&style=for-the-badge&logo=github"></a>
+    <a href="https://codecov.io/gh/mnbplus/PyAegis"><img alt="codecov" src="https://img.shields.io/codecov/c/github/mnbplus/PyAegis?style=for-the-badge&logo=codecov"></a>
+    <a href="https://opensource.org/licenses/MIT"><img alt="License" src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge"></a>
+    <a href="https://github.com/psf/black"><img alt="Code Style: Black" src="https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge"></a>
+    <a href="http://makeapullrequest.com"><img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=for-the-badge"></a>
+  </p>
 </div>
 
-<br/>
+> **Lightning-fast. Data-flow aware. Built for modern CI/CD.**
 
-> **Lightning-fast.** **Data-flow aware.** **Built for modern CI/CD pipelines.**
-
-**PyAegis** is an advanced static analysis vulnerability scanner designed specifically for the complexities of modern Python ecosystems. Stop relying on outdated, noisy regular expression scanners. PyAegis leverages true multiprocessing **AST (Abstract Syntax Tree) unrolling** and Control-Flow Graph (CFG) based **deep taint analysis** to track user input seamlessly across your application, massively reducing false positives while identifying critical zero-day logic flaws.
+**PyAegis** is a static analysis vulnerability scanner designed for modern Python projects. Instead of relying on brittle regex matching, PyAegis parses your code into an AST, builds a lightweight control-flow representation, and performs taint-style data-flow checks to determine whether **untrusted sources** can reach **dangerous sinks**.
 
 ---
 
-## ⚡ Table of Contents
-- [Enterprise-Grade Features](#-enterprise-grade-features)
-- [Installation](#-installation)
-- [Advanced Usage](#-advanced-usage)
-  - [CLI Flags](#cli-options)
-  - [SARIF Integration](#github-advanced-security-integration-sarif)
-- [Architecture & Data Flow](#-architecture--data-flow)
-- [Writing Custom Rules](#-writing-custom-rules)
-- [Continuous Integration (CI/CD)](#-continuous-integration-cicd)
-- [Contributing](#-community--contributing)
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start (5 steps)](#quick-start-5-steps)
+- [Usage](#usage)
+- [Architecture (in plain words)](#architecture-in-plain-words)
+- [Writing custom rules](#writing-custom-rules)
+- [CI/CD integration](#cicd-integration)
+- [Comparison with other tools](#comparison-with-other-tools)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
 
 ---
 
-## ✨ Enterprise-Grade Features
+## Features
 
-*   🚀 **Zero-Overhead AST Parsing**: Multi-core enabled parsing utilizing Python's native `ast` and `multiprocessing`. Scans massive monorepos in fractions of a second.
-*   🕸️ **Deep Taint Tracking**: Accurately detects SQL Injections, Command Injections, and XSS by tracking untrusted variables (`sources`) all the way down into sensitive system functions (`sinks`).
-*   🛠️ **Extensible Rule Engine**: YAML-based rule definitions allow your red team or AppSec engineers to write custom context-aware vulnerability signatures effortlessly.
-*   🤖 **Polymorphic Exports**: Natively exports to `TEXT`, `JSON`, and the industry-standard **`SARIF v2.1.0`**.
-*   🔗 **CI/CD Ready**: Drop-in GitHub Actions integration to block vulnerable pull requests before they reach your `main` branch. GitHub Advanced Security standard compliant.
+- **Multiprocessing AST parsing** for fast repo-wide scanning
+- **Taint-style checks**: track data from sources (e.g., `input`, environment, request objects) into sinks (e.g., `os.system`, `subprocess.*`, `eval/exec`)
+- **Rule-driven**: define sources/sinks in YAML (easy to extend)
+- **Multiple output formats**: `text`, `json`, `sarif` (SARIF v2.1.0)
+- **CI-ready**: fail builds on findings and upload SARIF to code scanning UIs
 
-## 📦 Installation
+---
 
-**Using pip (Recommended)**
+## Quick Start (5 steps)
+
+1) **Install**
 ```bash
 pip install pyaegis
 ```
 
-**From Source (Development Version)**
+2) **Scan a project directory** (uses default rules)
 ```bash
-git clone https://github.com/mnbplus/PyAegis.git
-cd PyAegis
-pip install -e ".[dev]"
+pyaegis .
 ```
 
-Verify the installation:
+3) **Scan with a custom rules file**
 ```bash
-pyaegis --help
+pyaegis . --rules ./pyaegis/rules/default.yml
+# or
+pyaegis . --rules ./custom_rules.yml
 ```
+
+4) **Export SARIF for GitHub / code scanning**
+```bash
+pyaegis . --format sarif --output pyaegis-results.sarif
+```
+
+5) **Use it in CI** (example: GitHub Actions SARIF upload)
+
+See: [docs/ci-integration.md](docs/ci-integration.md)
 
 ---
 
-## 🚀 Advanced Usage
+## Usage
 
-Scan your entire codebase for vulnerabilities with a single command:
-
+Basic:
 ```bash
-pyaegis ./my_project --rules ./pyaegis/rules/default.yml
+pyaegis <target>
 ```
 
-### CLI Options
-PyAegis is designed to be highly configurable via the command line:
+Common options:
 
-| Flag | Description | Default | Example |
-|------|-------------|---------|---------|
-| `target` | (Required) Target file or directory to scan. | - | `pyaegis ./src` |
-| `--rules` | Path to custom YAML rules file. | `./pyaegis/rules/default.yml` | `--rules custom-rules.yml` |
-| `--format` | Output format (`text`, `json`, `sarif`). | `text` | `--format json` |
-| `--output` | Output file path. If not provided, prints to stdout. | `None` | `--output results.json` |
-| `--debug` | Enable verbose debug logging. | `False` | `--debug` |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `target` | Target file or directory to scan | - |
+| `--rules` | Path to rules YAML file | `pyaegis/rules/default.yml` |
+| `--format` | Output format: `text`, `json`, `sarif` | `text` |
+| `--output` | Output file path (otherwise stdout) | - |
+| `--debug` | Verbose logging | off |
 
-### Terminal Output Example (Human-Readable)
-
-```text
-[*] Parsing 45 Python files via AST...
-[*] Performing Taint Tracking against Context Sinks...
-[-] Detected 1 Potential Vulnerabilities:
-    -> [CRITICAL] Untrusted user input executed by system sink. (PYA-100) | File: ./my_project/app.py:42 | Context: handle_request
-```
-
-### 🔒 GitHub Advanced Security Integration (SARIF)
-
-Export your findings directly into GitHub's Native Code Scanning Alerts UI:
-
+Example (JSON to file):
 ```bash
-pyaegis ./my_project --format sarif --output results.sarif
+pyaegis ./my_project --format json --output results.json
 ```
-*Upload `results.sarif` to GitHub Actions, and findings will be annotated directly on the vulnerable lines of code in your Pull Requests!*
+
+Exit codes:
+- `0`: no findings
+- `1`: findings detected or fatal scan error
 
 ---
 
-## 🧠 Architecture & Data Flow
+## Architecture (in plain words)
 
-How exactly does PyAegis achieve its low false-positive rate? It mathematically models your application's execution path without actually running it.
+PyAegis is intentionally simple to understand and extend. A scan flows like this:
 
-Here is the high-level architecture of the PyAegis engine:
+1. **Collect targets**: discover `.py` files from the provided path.
+2. **Parse & model**: parse each file into an **AST** (in parallel), then build a per-function representation (CFG-like blocks).
+3. **Load rules**: read YAML rules that define:
+   - **inputs**: where untrusted data originates (sources)
+   - **sinks**: dangerous functions/APIs that should never receive tainted data
+4. **Taint tracking**:
+   - mark variables assigned from a source call as tainted
+   - propagate taint through the function body
+   - when a tainted value reaches a sink call, emit a finding
+5. **Report**: output as text/JSON/SARIF for humans and CI systems.
 
-```mermaid
-graph TD
-    A[Source Code (.py)] -->|Parallel AST Parser| B(AST Nodes)
-    B -->|CFG Builder| C{Control-Flow Graph}
-    C -->|Taint Engine| D[Identify Sources]
-    D --> E[Track Variable Propagation]
-    E --> F{Reaches a Sink?}
-    F -- Yes --> G[Flag Vulnerability]
-    F -- No --> H[Mark as Safe]
-    G --> I[Reporter Module]
-    I -->|Polymorphic Export| J[SARIF / JSON / Text]
-```
-
-- **Sources**: Entry points for untrusted user data (e.g., `request.args.get()`, `os.environ`).
-- **Sinks**: Dangerous execution contexts where malicious data can cause harm (e.g., `subprocess.call()`, `eval()`, SQL driver execution strings).
+Key terms:
+- **Sources**: entry points for untrusted data (e.g., `input()`, request parameters, environment variables)
+- **Sinks**: sensitive APIs where tainted data is dangerous (e.g., `os.system`, `subprocess.call`, `eval`)
 
 ---
 
-## 🛠️ Writing Custom Rules
+## Writing custom rules
 
-Security is not one-size-fits-all. You can easily extend PyAegis to detect business-logic specific vulnerabilities using our unified YAML signature engine.
+Rules are YAML files with two top-level keys:
 
-Create a file named `custom_rules.yml`:
+- `inputs`: a list of source names
+- `sinks`: a list of sink names
+
+Example:
 
 ```yaml
-# A simple rule to detect untrusted data hitting internal microservices
-
 inputs:
-  # Define where untrusted data originates
-  - request.GET.get
-  - flask.request.form
-  - user_input_prompt
+  - input
+  - os.getenv
+  - request
 
 sinks:
-  # Define the dangerous functions
-  - my_internal_api.send_payment
-  - utils.execute_raw_query
+  - eval
+  - exec
+  - os.system
+  - subprocess.call
+  - subprocess.Popen
 ```
 
-Run PyAegis with your custom signature:
+Run:
 ```bash
 pyaegis ./src --rules custom_rules.yml
 ```
 
----
-
-## ⚙️ Continuous Integration (CI/CD)
-
-PyAegis is built to be embedded directly into modern DevOps pipelines to establish **Shift-Left Security**.
-
-### GitHub Actions Workflow
-Create a `.github/workflows/pyaegis-scan.yml` file to block insecure pull requests automatically:
-
-```yaml
-name: PyAegis SAST Scan
-
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-jobs:
-  security-scan:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.10"
-
-    - name: Install PyAegis
-      run: pip install pyaegis
-
-    - name: Run Scan and Export SARIF
-      run: pyaegis . --format sarif --output pyaegis-results.sarif
-      continue-on-error: true # Allow upload step to happen even if vulns are found
-
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: pyaegis-results.sarif
-```
+More details: [docs/rules.md](docs/rules.md)
 
 ---
 
-## 🤝 Community & Contributing
+## CI/CD integration
 
-We welcome contributions from the community! Whether you want to add new framework parsers (e.g., Django, FastAPI), improve the CFG logic, or enhance the reporting engine, we'd love your help.
+PyAegis is designed to work as a build step:
+- fail the pipeline if findings are detected
+- optionally export SARIF and upload it to your code scanning UI
 
-Please read our guidelines before submitting a Pull Request:
-- [Contributing Guidelines](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Security Policy](SECURITY.md)
+See full examples for **GitHub Actions**, **GitLab CI**, and **Jenkins**:
+- [docs/ci-integration.md](docs/ci-integration.md)
 
 ---
-<div align="center">
-  <i>A massive shout-out to all early adopters who believed in the AST approach. Let's make Python secure by default.</i> 🛡️
-</div>
+
+## Comparison with other tools
+
+| Tool | Primary focus | Languages | Rule format | Data-flow / taint mode | SARIF output | Typical usage |
+|------|---------------|-----------|-------------|-------------------------|--------------|---------------|
+| **PyAegis** | Python SAST with source→sink checks | Python | YAML (sources/sinks) | Yes (source→sink taint-style) | Yes | Lightweight Python repo scans + CI gates |
+| Bandit | Python security lints | Python | Python plugins + config | Limited (mostly pattern/AST checks) | Not native (can be integrated via converters) | Quick lint-style security checks |
+| Semgrep | Multi-language SAST + patterns | Many | YAML rules | Yes (taint mode available) | Yes | Broad scanning across polyglot monorepos |
+
+Notes:
+- Bandit excels at quick, well-known Python security checks, but is typically less focused on end-to-end source→sink tracking.
+- Semgrep is great for multi-language repos and has a powerful rule ecosystem; PyAegis focuses on Python-first scanning with a minimal rule surface.
+
+---
+
+## Roadmap
+
+Planned improvements (in rough priority order):
+
+- More built-in **sources/sinks** (Django/FastAPI/Flask helpers, deserialization, template injection)
+- Better **inter-procedural tracking** (taint across function boundaries)
+- Framework-aware modeling (request objects, ORMs, common sanitizers)
+- Baselines / suppressions (ignore existing findings, focus on new regressions)
+- Performance profiling and incremental scanning for large monorepos
+
+---
+
+## Contributing
+
+Contributions are welcome:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md)
+
+Documentation site (MkDocs): see `docs/` and `mkdocs.yml`.
