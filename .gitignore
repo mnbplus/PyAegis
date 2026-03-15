@@ -75,6 +75,9 @@ dmypy.json
 *.swp
 *.swo
 
+# PyAegis local cache
+.pyaegis_cache.pkl
+
 out.txt
 gha_output.txt
 *.txt

@@ -2,9 +2,10 @@
 PyAegis Reporters - Output formatters for scan results.
 SARIF 2.1.0 with full rule metadata, CWE tags, help URIs, and fix suggestions.
 """
-import json
+
 import datetime
-from typing import List, Dict, Any
+import json
+from typing import Any, Dict, List
 
 from .models import Finding, ScanResult
 
@@ -136,6 +137,7 @@ def _severity_to_sarif_level(severity: str) -> str:
 # Text reporter
 # ---------------------------------------------------------------------------
 
+
 class TextReporter:
     """Human-readable console output."""
 
@@ -149,7 +151,8 @@ class TextReporter:
         w("=" * 64 + "\n")
 
         if not result.findings:
-            w("\n✓ No security issues found!\n")
+            # Keep the phrasing stable for tests and external integrations.
+            w("\nNo vulnerabilities found.\n")
         else:
             w(f"\nFound {len(result.findings)} issue(s):\n\n")
             for f in result.findings:
@@ -172,6 +175,7 @@ class TextReporter:
 # JSON reporter
 # ---------------------------------------------------------------------------
 
+
 class JSONReporter:
     """Machine-readable JSON output."""
 
@@ -179,11 +183,14 @@ class JSONReporter:
         self.stream = stream
 
     def report(self, result: ScanResult) -> None:
+        # Test suite expects a stable top-level shape.
         data = {
-            "scan_time": datetime.datetime.utcnow().isoformat() + "Z",
-            "total_files": result.total_files,
-            "duration_seconds": result.duration_seconds,
-            "total_findings": len(result.findings),
+            "meta": {
+                "scan_time": datetime.datetime.utcnow().isoformat() + "Z",
+                "total_files_scanned": result.total_files,
+                "duration_seconds": result.duration_seconds,
+                "total_findings": len(result.findings),
+            },
             "findings": [
                 {
                     "rule_id": f.rule_id,
@@ -206,18 +213,9 @@ class JSONReporter:
 # SARIF 2.1.0 reporter
 # ---------------------------------------------------------------------------
 
-class SARIFReporter:
-    """
-    Produces a SARIF 2.1.0 document.
 
-    Schema  : https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json
-    Features:
-      - Full tool.driver.rules with shortDescription, fullDescription, help, helpUri
-      - CWE and OWASP tags via properties.tags
-      - fix / suggestion via fixes[].changes (SARIF fix object)
-      - rank derived from severity
-      - partialFingerprints for deduplication
-    """
+class SARIFReporter:
+    """Produces a SARIF 2.1.0 document."""
 
     SCHEMA_URI = (
         "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
@@ -229,12 +227,10 @@ class SARIFReporter:
     def __init__(self, stream):
         self.stream = stream
 
-    # ------------------------------------------------------------------
     def report(self, result: ScanResult) -> None:
         sarif_doc = self._build(result)
         self.stream.write(json.dumps(sarif_doc, indent=2))
 
-    # ------------------------------------------------------------------
     def _build(self, result: ScanResult) -> Dict[str, Any]:
         rules_map: Dict[str, Dict[str, Any]] = {}
         sarif_results: List[Dict[str, Any]] = []
@@ -243,7 +239,6 @@ class SARIFReporter:
             rule_id = finding.rule_id
             meta = _get_meta(rule_id)
 
-            # --- Build rule descriptor (once per rule_id) ---
             if rule_id not in rules_map:
                 rules_map[rule_id] = self._build_rule(rule_id, meta)
 
@@ -282,7 +277,6 @@ class SARIFReporter:
             ],
         }
 
-    # ------------------------------------------------------------------
     @staticmethod
     def _build_rule(rule_id: str, meta: Dict[str, str]) -> Dict[str, Any]:
         return {
@@ -318,16 +312,14 @@ class SARIFReporter:
             },
         }
 
-    # ------------------------------------------------------------------
     @staticmethod
     def _build_result(finding: Finding, meta: Dict[str, str]) -> Dict[str, Any]:
         uri = finding.file_path.replace("\\", "/")
         level = _severity_to_sarif_level(finding.severity)
 
-        # Build fix suggestion (SARIF fix object)
         fix_obj = {
             "description": {"text": meta["fix"]},
-            "artifactChanges": [],  # no automated patch — guidance only
+            "artifactChanges": [],
         }
 
         result: Dict[str, Any] = {
@@ -386,8 +378,10 @@ class SARIFReporter:
 # Legacy functional API (backwards-compatible)
 # ---------------------------------------------------------------------------
 
+
 def generate_text_report(result: ScanResult) -> str:
     import io
+
     buf = io.StringIO()
     TextReporter(buf).report(result)
     return buf.getvalue()
@@ -395,6 +389,7 @@ def generate_text_report(result: ScanResult) -> str:
 
 def generate_json_report(result: ScanResult) -> str:
     import io
+
     buf = io.StringIO()
     JSONReporter(buf).report(result)
     return buf.getvalue()
@@ -402,6 +397,7 @@ def generate_json_report(result: ScanResult) -> str:
 
 def generate_sarif_report(result: ScanResult) -> str:
     import io
+
     buf = io.StringIO()
     SARIFReporter(buf).report(result)
     return buf.getvalue()
