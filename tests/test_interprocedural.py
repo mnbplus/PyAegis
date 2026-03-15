@@ -28,7 +28,6 @@ def test_interprocedural_alias_exists():
     assert InterproceduralAnalyzer is not None
 
 
-@pytest.mark.skip(reason="API alignment pending - tracked in ROADMAP P0")
 def test_symbol_table_registers_functions():
     code = "def foo(x, y): pass\ndef bar(z): pass"
     tree = ast.parse(code)
@@ -38,7 +37,6 @@ def test_symbol_table_registers_functions():
     assert "mod.bar" in st.functions
 
 
-@pytest.mark.skip(reason="API alignment pending - tracked in ROADMAP P0")
 def test_symbol_table_registers_imports():
     code = "from mymod import helper"
     tree = ast.parse(code)
@@ -52,6 +50,8 @@ def test_interprocedural_basic():
     pass
 
 
-@pytest.mark.skip(reason="requires full inter-procedural taint integration - ROADMAP P0")
+@pytest.mark.skip(
+    reason="requires full inter-procedural taint integration - ROADMAP P0"
+)
 def test_interprocedural_propagates_internal_source_return(tmp_path):
     pass
