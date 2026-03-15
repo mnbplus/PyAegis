@@ -98,9 +98,7 @@ def _resolve_rules_path(rules: Optional[str], ruleset: Optional[str]) -> str:
         resolved = _resolve_ruleset(ruleset)
         if resolved is None:
             available = ", ".join(sorted(_available_rulesets().keys()))
-            raise ValueError(
-                f"Unknown ruleset '{ruleset}'. Available: {available}"
-            )
+            raise ValueError(f"Unknown ruleset '{ruleset}'. Available: {available}")
         return resolved
     return _default_rules_path()
 
@@ -365,9 +363,11 @@ def _apply_diff_to_file(file_path: str, diff_text: str) -> bool:
         return False
 
     try:
-        original_lines = Path(file_path).read_text(
-            encoding="utf-8", errors="replace"
-        ).splitlines(keepends=True)
+        original_lines = (
+            Path(file_path)
+            .read_text(encoding="utf-8", errors="replace")
+            .splitlines(keepends=True)
+        )
     except OSError:
         return False
 
@@ -388,7 +388,10 @@ def _apply_diff_to_file(file_path: str, diff_text: str) -> bool:
             continue
 
         if line.startswith("@@"):
-            match = re.match(r"@@ -(?P<old>\d+)(?:,(?P<oldlen>\d+))? \+(?P<new>\d+)(?:,(?P<newlen>\d+))? @@", line)
+            match = re.match(
+                r"@@ -(?P<old>\d+)(?:,(?P<oldlen>\d+))? \+(?P<new>\d+)(?:,(?P<newlen>\d+))? @@",
+                line,
+            )
             if not match:
                 return False
             old_start = int(match.group("old"))
@@ -411,7 +414,9 @@ def _apply_diff_to_file(file_path: str, diff_text: str) -> bool:
                 if hunk_line.startswith(" "):
                     if src_index >= len(original_lines):
                         return False
-                    if original_lines[src_index].rstrip("\n") != _strip_prefix(hunk_line):
+                    if original_lines[src_index].rstrip("\n") != _strip_prefix(
+                        hunk_line
+                    ):
                         return False
                     patched.append(original_lines[src_index])
                     src_index += 1
@@ -419,7 +424,9 @@ def _apply_diff_to_file(file_path: str, diff_text: str) -> bool:
                 elif hunk_line.startswith("-"):
                     if src_index >= len(original_lines):
                         return False
-                    if original_lines[src_index].rstrip("\n") != _strip_prefix(hunk_line):
+                    if original_lines[src_index].rstrip("\n") != _strip_prefix(
+                        hunk_line
+                    ):
                         return False
                     src_index += 1
                     consumed += 1
@@ -496,8 +503,7 @@ def _cmd_init(force: bool) -> int:
         "#   severity: list of severities to report (allowlist)\n"
         "#   workers: parsing worker processes\n"
         "#   timeout: per-file parse timeout seconds (null = no limit)\n"
-        "#\n"
-        + yaml.safe_dump(content, sort_keys=False)
+        "#\n" + yaml.safe_dump(content, sort_keys=False)
     )
 
     path.write_text(yaml_text, encoding="utf-8")
@@ -590,7 +596,9 @@ def _scan(args: argparse.Namespace) -> int:
         sys.stderr.write(str(e) + "\n")
         return 2
     out_format = args.format or "text"
-    workers = int(args.workers) if args.workers is not None else max(os.cpu_count() or 4, 1)
+    workers = (
+        int(args.workers) if args.workers is not None else max(os.cpu_count() or 4, 1)
+    )
     timeout = args.timeout
 
     sev_allow: Optional[set[str]]
@@ -643,7 +651,9 @@ def _scan(args: argparse.Namespace) -> int:
         duration_seconds=float(f"{duration:.3f}"),
     )
 
-    output_stream = open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
+    output_stream = (
+        open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
+    )
 
     try:
         if out_format == "json":
@@ -682,7 +692,7 @@ def _apply_patch_to_source(
     rewritten = engine._rewrite_line(original_line, finding)
     if rewritten is None or rewritten == original_line:
         return None
-    new_lines = lines[:line_idx] + [rewritten] + lines[line_idx + 1:]
+    new_lines = lines[:line_idx] + [rewritten] + lines[line_idx + 1 :]
     return "".join(new_lines)
 
 
@@ -694,10 +704,18 @@ def _cmd_remediate(args: argparse.Namespace) -> int:
         return 1
 
     use_color = not getattr(args, "no_color", False)
-    rules_path = getattr(args, "rules", None) or _default_rules_path()
+    try:
+        rules_path = _resolve_rules_path(
+            getattr(args, "rules", None), getattr(args, "ruleset", None)
+        )
+    except ValueError as e:
+        sys.stderr.write(str(e) + "\n")
+        return 2
 
     try:
-        _, findings = _run_taint_scan(target, rules_path, workers=1, show_progress=False)
+        _, findings = _run_taint_scan(
+            target, rules_path, workers=1, show_progress=False
+        )
     except ParserError as e:
         sys.stderr.write(f"remediate: parse error: {e}\n")
         return 1
@@ -788,7 +806,9 @@ def _cmd_remediate(args: argparse.Namespace) -> int:
         w("\n")
 
     w("-" * 64 + "\n")
-    w(f"Total: {len(findings)} finding(s). Run `pyaegis fix <file>` for patch generation.\n")
+    w(
+        f"Total: {len(findings)} finding(s). Run `pyaegis fix <file>` for patch generation.\n"
+    )
     return 1  # findings exist
 
 
@@ -803,7 +823,9 @@ def _cmd_fix(args: argparse.Namespace) -> int:
     rules_path = getattr(args, "rules", None) or _default_rules_path()
 
     try:
-        _, findings = _run_taint_scan(target, rules_path, workers=1, show_progress=False)
+        _, findings = _run_taint_scan(
+            target, rules_path, workers=1, show_progress=False
+        )
     except ParserError as e:
         sys.stderr.write(f"fix: parse error: {e}\n")
         return 1
@@ -870,10 +892,14 @@ def _cmd_fix(args: argparse.Namespace) -> int:
     # --- apply ---
     if args.apply and patches and not args.dry_run:
         try:
-            answer = input(
-                f"Apply {len(patches)} patch(es) to '{target}'? "
-                "This will overwrite the file (a .bak backup is created). [y/N] "
-            ).strip().lower()
+            answer = (
+                input(
+                    f"Apply {len(patches)} patch(es) to '{target}'? "
+                    "This will overwrite the file (a .bak backup is created). [y/N] "
+                )
+                .strip()
+                .lower()
+            )
         except (EOFError, KeyboardInterrupt):
             answer = "n"
 
@@ -914,7 +940,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     # Backwards-compatibility: pyaegis <path> -> pyaegis scan <path>
-    known_cmds = {"scan", "explain", "list-rules", "init", "version", "fix", "remediate"}
+    known_cmds = {
+        "scan",
+        "explain",
+        "list-rules",
+        "init",
+        "version",
+        "fix",
+        "remediate",
+    }
     if argv and not argv[0].startswith("-") and argv[0] not in known_cmds:
         argv = ["scan", *argv]
 
