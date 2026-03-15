@@ -86,6 +86,9 @@ fix.py
 fixb.py
 fixc.py
 
+# benchmark CI artifacts
+benchmark_report.json
+
 out.txt
 gha_output.txt
 *.txt
