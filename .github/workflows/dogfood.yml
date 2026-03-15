@@ -1,0 +1,71 @@
+# .github/workflows/dogfood.yml
+# PyAegis dogfooding — scan the PyAegis source code with PyAegis itself.
+# Results are uploaded to GitHub Code Scanning (SARIF) so every PR
+# shows security findings directly in the diff.
+
+name: "PyAegis Dogfood (Self-Scan)"
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+    paths:
+      - "pyaegis/**"
+      - "tests/**"
+      - ".github/workflows/dogfood.yml"
+  pull_request:
+    branches: ["main", "master", "develop"]
+  schedule:
+    # Run every Monday at 03:00 UTC
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  dogfood:
+    name: "Dogfood – PyAegis scans itself"
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # upload SARIF to Code Scanning
+      contents: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install PyAegis from source
+        run: |
+          pip install -e .
+
+      - name: Run PyAegis on itself (SARIF)
+        run: |
+          pyaegis pyaegis \
+            --rules pyaegis/rules/default.yml \
+            --format sarif \
+            --output dogfood.sarif || true
+        # `|| true` so we always upload results even when findings exist
+
+      - name: Display text summary
+        run: |
+          pyaegis pyaegis \
+            --rules pyaegis/rules/default.yml \
+            --format text || true
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: dogfood.sarif
+          category: pyaegis-dogfood
+
+      - name: Archive SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-sarif
+          path: dogfood.sarif
+          retention-days: 30

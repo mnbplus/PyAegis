@@ -1,107 +1,407 @@
+"""
+PyAegis Reporters - Output formatters for scan results.
+SARIF 2.1.0 with full rule metadata, CWE tags, help URIs, and fix suggestions.
+"""
 import json
-from typing import IO
-from pyaegis.models import ScanResult
+import datetime
+from typing import List, Dict, Any
+
+from .models import Finding, ScanResult
 
 
-class Reporter:
-    """Base class for reporting scan results."""
+# ---------------------------------------------------------------------------
+# Rule metadata registry
+# ---------------------------------------------------------------------------
 
-    def __init__(self, output_stream: IO[str]):
-        self.output_stream = output_stream
+RULE_METADATA: Dict[str, Dict[str, str]] = {
+    "taint-command-injection": {
+        "name": "CommandInjection",
+        "shortDescription": "OS command injection via tainted data",
+        "fullDescription": (
+            "User-controlled data flows into a shell execution sink "
+            "(os.system, subprocess.*, eval, exec) without sanitization, "
+            "enabling arbitrary command execution."
+        ),
+        "helpText": (
+            "Use subprocess.run() with a list of arguments and shell=False. "
+            "Never pass unsanitized user input to shell commands. "
+            "Consider using shlex.quote() if shell strings are unavoidable."
+        ),
+        "helpUri": "https://owasp.org/www-community/attacks/Command_Injection",
+        "cwe": "CWE-78",
+        "cweUri": "https://cwe.mitre.org/data/definitions/78.html",
+        "owasp": "A03:2021",
+        "fix": "Replace shell=True with a list-form subprocess call; validate/whitelist inputs before use.",
+    },
+    "taint-sql-injection": {
+        "name": "SqlInjection",
+        "shortDescription": "SQL injection via tainted data",
+        "fullDescription": (
+            "User-controlled data is concatenated into a SQL query without "
+            "parameterization, allowing an attacker to manipulate database queries."
+        ),
+        "helpText": (
+            "Use parameterized queries or an ORM. "
+            "Example: cursor.execute('SELECT * FROM t WHERE id=%s', (uid,))"
+        ),
+        "helpUri": "https://owasp.org/www-community/attacks/SQL_Injection",
+        "cwe": "CWE-89",
+        "cweUri": "https://cwe.mitre.org/data/definitions/89.html",
+        "owasp": "A03:2021",
+        "fix": "Use parameterized queries; never build SQL strings with user data.",
+    },
+    "taint-eval-injection": {
+        "name": "EvalInjection",
+        "shortDescription": "Code injection via eval/exec with tainted data",
+        "fullDescription": (
+            "Tainted user input reaches eval() or exec(), allowing arbitrary "
+            "Python code execution."
+        ),
+        "helpText": (
+            "Avoid eval/exec entirely. If dynamic evaluation is required, "
+            "use ast.literal_eval for safe literal parsing."
+        ),
+        "helpUri": "https://owasp.org/www-community/attacks/Code_Injection",
+        "cwe": "CWE-94",
+        "cweUri": "https://cwe.mitre.org/data/definitions/94.html",
+        "owasp": "A03:2021",
+        "fix": "Replace eval/exec with ast.literal_eval or a safe data-parsing alternative.",
+    },
+    "taint-path-traversal": {
+        "name": "PathTraversal",
+        "shortDescription": "Path traversal via tainted filename",
+        "fullDescription": (
+            "User-controlled data is used in a file-system path operation "
+            "without normalization, allowing directory traversal attacks."
+        ),
+        "helpText": (
+            "Use pathlib.Path.resolve() and validate that the resolved path "
+            "starts with the intended base directory."
+        ),
+        "helpUri": "https://owasp.org/www-community/attacks/Path_Traversal",
+        "cwe": "CWE-22",
+        "cweUri": "https://cwe.mitre.org/data/definitions/22.html",
+        "owasp": "A01:2021",
+        "fix": "Validate resolved paths against a trusted base directory before opening files.",
+    },
+    "taint-ssrf": {
+        "name": "SSRF",
+        "shortDescription": "Server-Side Request Forgery via tainted URL",
+        "fullDescription": (
+            "User-controlled data is used as a URL in an outbound HTTP request, "
+            "allowing the server to be used as a proxy to internal services."
+        ),
+        "helpText": (
+            "Validate and whitelist allowed URL schemes and hosts. "
+            "Use an allowlist of known-safe endpoints."
+        ),
+        "helpUri": "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html",
+        "cwe": "CWE-918",
+        "cweUri": "https://cwe.mitre.org/data/definitions/918.html",
+        "owasp": "A10:2021",
+        "fix": "Allowlist permitted hosts/schemes; reject or sanitize user-supplied URLs.",
+    },
+    # Generic fallback populated dynamically for unknown rule IDs
+}
 
-    def report(self, result: ScanResult):
-        raise NotImplementedError
+_GENERIC_META: Dict[str, str] = {
+    "name": "SecurityFinding",
+    "shortDescription": "Potential security vulnerability detected",
+    "fullDescription": "A taint-tracking analysis identified a potentially dangerous data flow.",
+    "helpText": "Review the flagged code path and ensure untrusted input is properly validated.",
+    "helpUri": "https://owasp.org/www-project-top-ten/",
+    "cwe": "CWE-20",
+    "cweUri": "https://cwe.mitre.org/data/definitions/20.html",
+    "owasp": "A03:2021",
+    "fix": "Validate and sanitize all user-controlled input before use in sensitive operations.",
+}
 
 
-class TextReporter(Reporter):
-    """Outputs human-readable text."""
+def _get_meta(rule_id: str) -> Dict[str, str]:
+    """Return rule metadata, falling back to generic entry."""
+    return RULE_METADATA.get(rule_id, _GENERIC_META)
 
-    def report(self, result: ScanResult):
+
+def _severity_to_sarif_level(severity: str) -> str:
+    return {
+        "CRITICAL": "error",
+        "HIGH": "error",
+        "MEDIUM": "warning",
+        "LOW": "note",
+        "INFO": "none",
+    }.get(severity.upper(), "warning")
+
+
+# ---------------------------------------------------------------------------
+# Text reporter
+# ---------------------------------------------------------------------------
+
+class TextReporter:
+    """Human-readable console output."""
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def report(self, result: ScanResult) -> None:
+        w = self.stream.write
+        w("=" * 64 + "\n")
+        w("  PyAegis Security Scan Report\n")
+        w("=" * 64 + "\n")
+
         if not result.findings:
-            self.output_stream.write(
-                "[+] No vulnerabilities detected. Subsystems secure.\n"
-            )
-            return
+            w("\n✓ No security issues found!\n")
+        else:
+            w(f"\nFound {len(result.findings)} issue(s):\n\n")
+            for f in result.findings:
+                meta = _get_meta(f.rule_id)
+                w(f"[{f.severity}] {f.rule_id} — {meta['shortDescription']}\n")
+                w(f"  File   : {f.file_path}:{f.line_number}\n")
+                w(f"  Source : {f.source_var}\n")
+                w(f"  Sink   : {f.sink_context}\n")
+                w(f"  CWE    : {meta['cwe']}\n")
+                w(f"  Fix    : {meta['fix']}\n")
+                w("\n")
 
-        self.output_stream.write(
-            f"[-] Detected {len(result.findings)} Potential Vulnerabilities:\n"
-        )
-        for finding in result.findings:
-            self.output_stream.write(
-                f"    -> [{finding.severity}] {finding.description} "
-                f"({finding.rule_id}) | "
-                f"File: {finding.file_path}:{finding.line_number} | "
-                f"Context: {finding.sink_context}\n"
-            )
+        w("-" * 64 + "\n")
+        w(f"Files scanned : {result.total_files}\n")
+        w(f"Total findings: {len(result.findings)}\n")
+        w(f"Duration      : {result.duration_seconds:.3f}s\n")
 
 
-class JSONReporter(Reporter):
-    """Outputs JSON array of findings."""
+# ---------------------------------------------------------------------------
+# JSON reporter
+# ---------------------------------------------------------------------------
 
-    def report(self, result: ScanResult):
+class JSONReporter:
+    """Machine-readable JSON output."""
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    def report(self, result: ScanResult) -> None:
         data = {
-            "meta": {
-                "total_files_scanned": result.total_files,
-                "duration_seconds": result.duration_seconds,
-            },
+            "scan_time": datetime.datetime.utcnow().isoformat() + "Z",
+            "total_files": result.total_files,
+            "duration_seconds": result.duration_seconds,
+            "total_findings": len(result.findings),
             "findings": [
                 {
                     "rule_id": f.rule_id,
-                    "description": f.description,
-                    "file": f.file_path,
-                    "line": f.line_number,
                     "severity": f.severity,
-                    "context": f.sink_context,
+                    "description": f.description,
+                    "file_path": f.file_path,
+                    "line_number": f.line_number,
+                    "source_var": f.source_var,
+                    "sink_context": f.sink_context,
+                    "cwe": _get_meta(f.rule_id)["cwe"],
+                    "fix": _get_meta(f.rule_id)["fix"],
                 }
                 for f in result.findings
             ],
         }
-        json.dump(data, self.output_stream, indent=4)
+        self.stream.write(json.dumps(data, indent=2))
 
 
-class SARIFReporter(Reporter):
+# ---------------------------------------------------------------------------
+# SARIF 2.1.0 reporter
+# ---------------------------------------------------------------------------
+
+class SARIFReporter:
     """
-    Outputs standard SARIF v2.1.0 format natively supported by GitHub.
+    Produces a SARIF 2.1.0 document.
+
+    Schema  : https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json
+    Features:
+      - Full tool.driver.rules with shortDescription, fullDescription, help, helpUri
+      - CWE and OWASP tags via properties.tags
+      - fix / suggestion via fixes[].changes (SARIF fix object)
+      - rank derived from severity
+      - partialFingerprints for deduplication
     """
 
-    def report(self, result: ScanResult):
-        run_dict = {
-            "tool": {
-                "driver": {
-                    "name": "PyAegis",
-                    "informationUri": "https://github.com/PyAegis/PyAegis",
-                    "rules": [],
+    SCHEMA_URI = (
+        "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
+    )
+    TOOL_NAME = "PyAegis"
+    TOOL_VERSION = "0.2.0"
+    TOOL_INFO_URI = "https://github.com/mnbplus/PyAegis"
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    # ------------------------------------------------------------------
+    def report(self, result: ScanResult) -> None:
+        sarif_doc = self._build(result)
+        self.stream.write(json.dumps(sarif_doc, indent=2))
+
+    # ------------------------------------------------------------------
+    def _build(self, result: ScanResult) -> Dict[str, Any]:
+        rules_map: Dict[str, Dict[str, Any]] = {}
+        sarif_results: List[Dict[str, Any]] = []
+
+        for finding in result.findings:
+            rule_id = finding.rule_id
+            meta = _get_meta(rule_id)
+
+            # --- Build rule descriptor (once per rule_id) ---
+            if rule_id not in rules_map:
+                rules_map[rule_id] = self._build_rule(rule_id, meta)
+
+            sarif_results.append(self._build_result(finding, meta))
+
+        return {
+            "$schema": self.SCHEMA_URI,
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": self.TOOL_NAME,
+                            "version": self.TOOL_VERSION,
+                            "semanticVersion": self.TOOL_VERSION,
+                            "informationUri": self.TOOL_INFO_URI,
+                            "organization": "PyAegis Project",
+                            "rules": list(rules_map.values()),
+                        }
+                    },
+                    "invocations": [
+                        {
+                            "executionSuccessful": True,
+                            "commandLine": "pyaegis scan",
+                            "endTimeUtc": datetime.datetime.utcnow().strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            ),
+                        }
+                    ],
+                    "results": sarif_results,
+                    "properties": {
+                        "totalFiles": result.total_files,
+                        "durationSeconds": result.duration_seconds,
+                    },
                 }
-            },
-            "results": [],
+            ],
         }
 
-        # Populate results
-        for idx, finding in enumerate(result.findings):
-            run_dict["results"].append(
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_rule(rule_id: str, meta: Dict[str, str]) -> Dict[str, Any]:
+        return {
+            "id": rule_id,
+            "name": meta["name"],
+            "shortDescription": {"text": meta["shortDescription"]},
+            "fullDescription": {"text": meta["fullDescription"]},
+            "help": {
+                "text": meta["helpText"],
+                "markdown": (
+                    f"**{meta['shortDescription']}**\n\n"
+                    f"{meta['fullDescription']}\n\n"
+                    f"### Remediation\n{meta['helpText']}\n\n"
+                    f"### References\n"
+                    f"- [{meta['cwe']}]({meta['cweUri']})\n"
+                    f"- [OWASP {meta['owasp']}](https://owasp.org/Top10/)\n"
+                    f"- [Details]({meta['helpUri']})\n"
+                ),
+            },
+            "helpUri": meta["helpUri"],
+            "defaultConfiguration": {
+                "level": _severity_to_sarif_level(meta.get("severity", "HIGH"))
+            },
+            "properties": {
+                "tags": [
+                    meta["cwe"],
+                    f"owasp:{meta['owasp']}",
+                    "security",
+                    "python",
+                ],
+                "precision": "medium",
+                "problem.severity": meta.get("severity", "HIGH").lower(),
+            },
+        }
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _build_result(finding: Finding, meta: Dict[str, str]) -> Dict[str, Any]:
+        uri = finding.file_path.replace("\\", "/")
+        level = _severity_to_sarif_level(finding.severity)
+
+        # Build fix suggestion (SARIF fix object)
+        fix_obj = {
+            "description": {"text": meta["fix"]},
+            "artifactChanges": [],  # no automated patch — guidance only
+        }
+
+        result: Dict[str, Any] = {
+            "ruleId": finding.rule_id,
+            "level": level,
+            "rank": {
+                "CRITICAL": 95.0,
+                "HIGH": 80.0,
+                "MEDIUM": 50.0,
+                "LOW": 25.0,
+                "INFO": 5.0,
+            }.get(finding.severity.upper(), 50.0),
+            "message": {
+                "text": (
+                    f"{finding.description} "
+                    f"(source: `{finding.source_var}`, sink: `{finding.sink_context}`)"
+                )
+            },
+            "locations": [
                 {
-                    "ruleId": finding.rule_id,
-                    "level": (
-                        "error" if finding.severity.upper() == "CRITICAL" else "warning"
-                    ),
-                    "message": {"text": finding.description},
-                    "locations": [
+                    "physicalLocation": {
+                        "artifactLocation": {
+                            "uri": uri,
+                            "uriBaseId": "%SRCROOT%",
+                        },
+                        "region": {
+                            "startLine": finding.line_number,
+                            "startColumn": 1,
+                        },
+                    },
+                    "logicalLocations": [
                         {
-                            "physicalLocation": {
-                                "artifactLocation": {"uri": finding.file_path},
-                                "region": {
-                                    "startLine": finding.line_number,
-                                    "snippet": {"text": finding.sink_context},
-                                },
-                            }
+                            "kind": "module",
+                            "name": uri.replace("/", ".").rstrip(".py"),
                         }
                     ],
                 }
-            )
-
-        sarif_out = {
-            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-            "version": "2.1.0",
-            "runs": [run_dict],
+            ],
+            "partialFingerprints": {
+                "primaryLocationLineHash": (
+                    f"{finding.rule_id}:{uri}:{finding.line_number}"
+                )
+            },
+            "fixes": [fix_obj],
+            "properties": {
+                "severity": finding.severity,
+                "sourceVariable": finding.source_var,
+                "sinkContext": finding.sink_context,
+                "cwe": meta["cwe"],
+            },
         }
-        json.dump(sarif_out, self.output_stream, indent=4)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Legacy functional API (backwards-compatible)
+# ---------------------------------------------------------------------------
+
+def generate_text_report(result: ScanResult) -> str:
+    import io
+    buf = io.StringIO()
+    TextReporter(buf).report(result)
+    return buf.getvalue()
+
+
+def generate_json_report(result: ScanResult) -> str:
+    import io
+    buf = io.StringIO()
+    JSONReporter(buf).report(result)
+    return buf.getvalue()
+
+
+def generate_sarif_report(result: ScanResult) -> str:
+    import io
+    buf = io.StringIO()
+    SARIFReporter(buf).report(result)
+    return buf.getvalue()
