@@ -79,6 +79,8 @@
 4. **Taint** — seed sources, propagate through the function, detect when taint reaches a sink.
 5. **Report** — emit findings as `text`, `json`, `csv`, `html`, or `sarif`.
 
+> Performance tip: parsing is cached in `.pyaegis_cache.sqlite` (SQLite-backed cache).
+
 ---
 
 ## Detects

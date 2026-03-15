@@ -23,6 +23,8 @@
 4. **Taint** — source を起点に関数内へ伝播させ、taint が sink に到達した時点で検出します。
 5. **Report** — 結果を `text` / `json` / `csv` / `html` / `sarif` として出力します。
 
+> パフォーマンス向上のため、解析結果は `.pyaegis_cache.sqlite`（SQLite キャッシュ）に保存されます。
+
 ---
 
 ## Detects

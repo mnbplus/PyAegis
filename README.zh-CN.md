@@ -93,6 +93,8 @@ pyaegis <target>
    - 若 tainted 数据进入 sink 调用，输出一条 Finding
 5. **报告输出**：按 text / JSON / SARIF 输出，便于人读或 CI 消费。
 
+> 性能提示：解析结果会缓存到 `.pyaegis_cache.sqlite`（SQLite 持久化缓存）。
+
 术语解释：
 - **Source（来源）**：不可信输入入口（如 `input()`、环境变量、请求参数等）
 - **Sink（汇聚点）**：危险执行点（如 `os.system`、`subprocess.*`、`eval/exec` 等）

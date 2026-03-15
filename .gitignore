@@ -76,6 +76,7 @@ dmypy.json
 *.swo
 
 # PyAegis local cache
+.pyaegis_cache.sqlite
 .pyaegis_cache.pkl
 
 out.txt

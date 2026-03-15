@@ -205,13 +205,93 @@ class _CacheEntry:
 
 
 class _FileCache:
-    """Persistent cache of parsed CFGs, keyed by absolute file path."""
+    """Persistent cache of parsed CFGs, keyed by absolute file path.
 
-    def __init__(self, cache_path: str):
+    Defaults to SQLite for durability. Set PYAEGIS_CACHE_BACKEND=pickle or
+    pass a .pkl cache_path to use the legacy pickle format.
+    """
+
+    def __init__(self, cache_path: str, mode: Optional[str] = None):
         self.cache_path = cache_path
+        self.mode = (mode or self._infer_mode(cache_path)).lower()
         self._entries: Dict[str, _CacheEntry] = {}
 
+    @staticmethod
+    def _infer_mode(cache_path: str) -> str:
+        lowered = cache_path.lower()
+        if lowered.endswith((".pkl", ".pickle")):
+            return "pickle"
+        if lowered.endswith((".sqlite", ".sqlite3", ".db")):
+            return "sqlite"
+        env = os.getenv("PYAEGIS_CACHE_BACKEND", "").strip().lower()
+        return env or "sqlite"
+
     def load(self) -> None:
+        if self.mode == "pickle":
+            self._load_pickle()
+            return
+
+        try:
+            if not os.path.exists(self.cache_path):
+                return
+            with sqlite3.connect(self.cache_path) as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS cache_entries "
+                    "(path TEXT PRIMARY KEY, sig TEXT NOT NULL, cfg BLOB NOT NULL)"
+                )
+                rows = conn.execute("SELECT path, sig, cfg FROM cache_entries")
+                out: Dict[str, _CacheEntry] = {}
+                for path, sig, cfg_blob in rows.fetchall():
+                    if (
+                        isinstance(path, str)
+                        and isinstance(sig, str)
+                        and cfg_blob is not None
+                    ):
+                        try:
+                            cfg = pickle.loads(cfg_blob)
+                        except Exception:
+                            continue
+                        out[path] = _CacheEntry(sig=sig, cfg=cfg)
+                self._entries = out
+        except Exception:
+            # Corrupt cache should never break scanning.
+            self._entries = {}
+
+    def save(self) -> None:
+        if self.mode == "pickle":
+            self._save_pickle()
+            return
+
+        try:
+            os.makedirs(os.path.dirname(self.cache_path), exist_ok=True)
+            with sqlite3.connect(self.cache_path) as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS cache_entries "
+                    "(path TEXT PRIMARY KEY, sig TEXT NOT NULL, cfg BLOB NOT NULL)"
+                )
+                conn.execute("DELETE FROM cache_entries")
+                rows = [
+                    (
+                        path,
+                        entry.sig,
+                        sqlite3.Binary(
+                            pickle.dumps(entry.cfg, protocol=pickle.HIGHEST_PROTOCOL)
+                        ),
+                    )
+                    for path, entry in self._entries.items()
+                ]
+                if rows:
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO cache_entries (path, sig, cfg) "
+                        "VALUES (?, ?, ?)",
+                        rows,
+                    )
+                conn.commit()
+        except Exception:
+            # Best-effort.
+            return
+
+    def _load_pickle(self) -> None:
         try:
             if not os.path.exists(self.cache_path):
                 return
@@ -237,7 +317,7 @@ class _FileCache:
             # Corrupt cache should never break scanning.
             self._entries = {}
 
-    def save(self) -> None:
+    def _save_pickle(self) -> None:
         try:
             os.makedirs(os.path.dirname(self.cache_path), exist_ok=True)
             tmp = self.cache_path + ".tmp"
@@ -311,13 +391,15 @@ class ParallelProjectParser:
             return {}
 
         # Cache location: beside the target root.
+        # Defaults to SQLite for durability (override via PYAEGIS_CACHE_BACKEND=pickle
+        # or passing a .pkl cache_path).
         if cache_path is None:
             root_dir = (
                 os.path.dirname(os.path.abspath(filepaths[0]))
                 if len(filepaths) == 1
                 else os.path.commonpath([os.path.abspath(p) for p in filepaths])
             )
-            cache_path = os.path.join(root_dir, ".pyaegis_cache.pkl")
+            cache_path = os.path.join(root_dir, ".pyaegis_cache.sqlite")
 
         cache = _FileCache(cache_path)
         cache.load()
