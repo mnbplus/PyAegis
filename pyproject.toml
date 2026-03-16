@@ -12,24 +12,23 @@ authors = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Security",
     "Topic :: Software Development :: Quality Assurance",
 ]
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
 keywords = ["security", "sast", "static-analysis", "taint-analysis", "vulnerability"]
+
+dependencies = [
+    "pyyaml>=6.0.1",
+]
 
 [project.urls]
 Homepage = "https://github.com/mnbplus/PyAegis"
 Repository = "https://github.com/mnbplus/PyAegis"
 Issues = "https://github.com/mnbplus/PyAegis/issues"
 Changelog = "https://github.com/mnbplus/PyAegis/blob/main/CHANGELOG.md"
-
-dependencies = [
-    "pyyaml>=6.0.1",
-]
 
 [project.optional-dependencies]
 ai = [
@@ -65,7 +64,7 @@ pyaegis = "pyaegis.cli:main"
 # Explicit package discovery to avoid setuptools failing on extra top-level dirs
 # (e.g. the generated "site/" docs folder).
 [tool.setuptools]
-packages = ["pyaegis", "pyaegis.core", "pyaegis.frameworks", "pyaegis.integrations", "pyaegis.rules"]
+packages = ["pyaegis", "pyaegis.core", "pyaegis.frameworks", "pyaegis.integrations", "pyaegis.intel", "pyaegis.modules", "pyaegis.rules"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
