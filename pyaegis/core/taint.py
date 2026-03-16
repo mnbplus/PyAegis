@@ -1011,6 +1011,16 @@ class TaintTracker:
                 ):
                     return True
 
+            # Tainted receiver propagation: if the object a method is called on
+            # is itself tainted, treat the call's return value as tainted too.
+            # e.g. self.request.GET.get('key') — self.request is tainted, so
+            # .GET is tainted, so .get('key') return value is tainted.
+            if isinstance(expr.func, ast.Attribute):
+                if self._is_tainted_expr(
+                    expr.func.value, tainted_vars, fnmap, callstack, tainted_params
+                ):
+                    return True
+
         return False
 
     def _taint_unpack_target(
@@ -1063,6 +1073,30 @@ class TaintTracker:
         callstack: List[str],
     ) -> None:
         """Analyze a single function body, updating vulnerabilities."""
+        # Django CBV: pre-seed self.request as tainted so that HTTP-method handlers
+        # (get/post/put/patch/delete/head/options/trace) that access ``self.request``
+        # without an explicit assignment in the same method body are still tracked.
+        # Django's View.setup() assigns ``self.request = request`` before dispatch,
+        # but since we analyse methods independently we inject the taint here.
+        _CBV_HTTP_METHODS = {
+            "get",
+            "post",
+            "put",
+            "patch",
+            "delete",
+            "head",
+            "options",
+            "trace",
+        }
+        if (
+            fnctx.name.split(".")[-1] in _CBV_HTTP_METHODS
+            and fnctx.args
+            and fnctx.args[0] == "self"
+        ):
+            if "self" not in self._instance_taints:
+                self._instance_taints["self"] = set()
+            self._instance_taints["self"].add("request")
+
         prev_file = self._current_file
         self._current_file = filepath
         try:
