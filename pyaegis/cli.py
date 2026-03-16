@@ -327,6 +327,43 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Automatically apply generated diffs to source files.",
     )
 
+    # --- debt ---
+    p_debt = sub.add_parser(
+        "debt",
+        help="Analyse technical debt hotspots (Git churn + cyclomatic complexity)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_debt.add_argument(
+        "--repo",
+        default=".",
+        help="Path to the git repository root (default: current directory).",
+    )
+    p_debt.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        help="Number of hotspots to display (default: 10).",
+    )
+    p_debt.add_argument(
+        "--min-churn",
+        type=int,
+        default=2,
+        dest="min_churn",
+        help="Minimum commit count to include a file (default: 2).",
+    )
+    p_debt.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output results as JSON.",
+    )
+    p_debt.add_argument(
+        "--llm-prompt",
+        action="store_true",
+        dest="llm_prompt",
+        help="Print a ready-made LLM prompt context for the top hotspots.",
+    )
+
     # --- fix ---
     p_fix = sub.add_parser(
         "fix",
@@ -1086,6 +1123,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "version",
         "fix",
         "remediate",
+        "debt",
     }
     if argv and not argv[0].startswith("-") and argv[0] not in known_cmds:
         argv = ["scan", *argv]
@@ -1113,6 +1151,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _cmd_fix(args)
     if cmd == "remediate":
         return _cmd_remediate(args)
+    if cmd == "debt":
+        from pyaegis.debt import DebtAnalyser
+        import json as _json
+
+        analyser = DebtAnalyser(repo_root=args.repo, min_churn=args.min_churn)
+        report = analyser.analyse(top=args.top)
+        if report.errors:
+            for err in report.errors:
+                sys.stderr.write(f"[WARN] {err}\n")
+        if args.json_output:
+            sys.stdout.write(
+                _json.dumps(report.to_dict(), indent=2, ensure_ascii=False) + "\n"
+            )
+        elif args.llm_prompt:
+            sys.stdout.write(report.to_llm_prompt(top=args.top) + "\n")
+        else:
+            if not report.hotspots:
+                sys.stdout.write("No hotspots found (try lowering --min-churn).\n")
+                return 0
+            sys.stdout.write(
+                f"\nTop {len(report.hotspots)} technical debt hotspots\n\n"
+            )
+            sys.stdout.write(
+                f"{'File':<55} {'Score':>6} {'Churn':>6} {'BugFix':>7} {'MaxCC':>6} {'Rank':>5} {'SLOC':>6}\n"
+            )
+            sys.stdout.write("-" * 95 + "\n")
+            for h in report.hotspots:
+                sys.stdout.write(
+                    f"{h.path:<55} {h.debt_score:>6.1f} {h.churn:>6} "
+                    f"{h.bug_fix_commits:>7} {h.max_complexity:>6} {h.complexity_rank:>5} {h.sloc:>6}\n"
+                )
+        return 0
 
     parser.print_help(sys.stdout)
     return 2

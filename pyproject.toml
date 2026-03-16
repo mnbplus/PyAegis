@@ -29,8 +29,14 @@ ai = [
 mcp = [
     "mcp>=1.0.0",
 ]
+debt = [
+    "radon>=6.0.0",
+    "sqlite-vec>=0.1.6",
+]
 dev = [
     "openai>=1.0.0",
+    "radon>=6.0.0",
+    "sqlite-vec>=0.1.6",
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "black>=23.9.1",
