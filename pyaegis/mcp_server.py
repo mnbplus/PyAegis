@@ -65,6 +65,14 @@ except ImportError:  # pragma: no cover
     DebtAnalyser = None  # type: ignore
 
 try:
+    from pyaegis.rag import CodeRAG
+
+    _RAG_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _RAG_AVAILABLE = False
+    CodeRAG = None  # type: ignore
+
+try:
     from pyaegis.rules_catalog import RULES, format_explain
 
     _CATALOG_AVAILABLE = True
@@ -225,6 +233,61 @@ async def handle_list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="search_code",
+            description=(
+                "Semantically search the indexed codebase for functions, classes, or "
+                "code blocks related to a query. Uses local sqlite-vec RAG — no cloud "
+                "required. Call index_codebase first if the index is empty."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language or keyword query, e.g. 'SQL injection sink' or 'authentication logic'.",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of results to return (default 5).",
+                    },
+                    "kind_filter": {
+                        "type": "string",
+                        "description": "Filter by chunk kind: 'function', 'class', or 'module'. Omit for all.",
+                    },
+                    "db_path": {
+                        "type": "string",
+                        "description": "Path to the RAG SQLite database (default: .pyaegis_rag.sqlite in cwd).",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        types.Tool(
+            name="index_codebase",
+            description=(
+                "Index a Python codebase directory into the local RAG database. "
+                "Run this once (or after code changes) before using search_code."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "directory": {
+                        "type": "string",
+                        "description": "Path to the Python project directory to index.",
+                    },
+                    "db_path": {
+                        "type": "string",
+                        "description": "Path to the RAG SQLite database (default: .pyaegis_rag.sqlite in cwd).",
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Force re-index even if files are unchanged.",
+                    },
+                },
+                "required": ["directory"],
+            },
+        ),
+        types.Tool(
             name="debt_analysis",
             description=(
                 "Analyse technical debt hotspots in a Python git repository. "
@@ -365,6 +428,86 @@ async def handle_call_tool(
                 indent=2,
             )
         )
+
+    # ------------------------------------------------------------------
+    # index_codebase
+    # ------------------------------------------------------------------
+    if name == "index_codebase":
+        if not _RAG_AVAILABLE:
+            return text(
+                json.dumps(
+                    {"error": "RAG not available. Run: pip install pyaegis[rag]"},
+                    indent=2,
+                )
+            )
+        import os
+
+        directory = args.get("directory", "")
+        db_path = args.get("db_path", ".pyaegis_rag.sqlite")
+        force = bool(args.get("force", False))
+        if not directory or not os.path.isdir(directory):
+            return text(
+                json.dumps({"error": f"Directory not found: {directory}"}, indent=2)
+            )
+        log.info("index_codebase: dir=%s db=%s force=%s", directory, db_path, force)
+        try:
+            rag = CodeRAG(db_path=db_path)
+            files, chunks = rag.index_directory(directory, force=force)
+            stats = rag.stats()
+            rag.close()
+        except Exception as exc:
+            log.exception("index_codebase failed")
+            return text(json.dumps({"error": str(exc)}, indent=2))
+        return text(
+            json.dumps(
+                {"files_indexed": files, "chunks_indexed": chunks, "stats": stats},
+                indent=2,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # search_code
+    # ------------------------------------------------------------------
+    elif name == "search_code":
+        if not _RAG_AVAILABLE:
+            return text(
+                json.dumps(
+                    {"error": "RAG not available. Run: pip install pyaegis[rag]"},
+                    indent=2,
+                )
+            )
+        query = args.get("query", "")
+        top_k = int(args.get("top_k", 5))
+        kind_filter = args.get("kind_filter") or None
+        db_path = args.get("db_path", ".pyaegis_rag.sqlite")
+        if not query:
+            return text(json.dumps({"error": "'query' is required"}, indent=2))
+        log.info("search_code: query=%s top_k=%d", query, top_k)
+        try:
+            rag = CodeRAG(db_path=db_path)
+            results = rag.search(query, top_k=top_k, kind_filter=kind_filter)
+            context = rag.build_context(results)
+            rag.close()
+        except Exception as exc:
+            log.exception("search_code failed")
+            return text(json.dumps({"error": str(exc)}, indent=2))
+        output = {
+            "query": query,
+            "count": len(results),
+            "results": [
+                {
+                    "score": round(r.score, 4),
+                    "file": r.chunk.file_path,
+                    "name": r.chunk.name,
+                    "kind": r.chunk.kind,
+                    "lines": f"{r.chunk.start_line}-{r.chunk.end_line}",
+                    "docstring": r.chunk.docstring[:200] if r.chunk.docstring else "",
+                }
+                for r in results
+            ],
+            "context": context,
+        }
+        return text(json.dumps(output, indent=2, default=str))
 
     # ------------------------------------------------------------------
     # scan_directory

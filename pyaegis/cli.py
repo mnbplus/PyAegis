@@ -1,4 +1,4 @@
-"""PyAegis CLI.
+﻿"""PyAegis CLI.
 
 UX goals:
 - Provide discoverable subcommands: scan / explain / list-rules / init / version / fix
@@ -363,6 +363,24 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="llm_prompt",
         help="Print a ready-made LLM prompt context for the top hotspots.",
     )
+
+    # --- install-rules ---
+    p_ir = sub.add_parser(
+        "install-rules",
+        help="Install a community rule pack from a URL or local path",
+    )
+    p_ir.add_argument("source", help="URL or local path to a YAML rule pack.")
+    p_ir.add_argument("--name", default=None, help="Name for the rule pack.")
+    p_ir.add_argument(
+        "--force", action="store_true", help="Overwrite if already installed."
+    )
+
+    # --- list-installed-rules ---
+    sub.add_parser("list-installed-rules", help="List installed community rule packs")
+
+    # --- remove-rules ---
+    p_rr = sub.add_parser("remove-rules", help="Remove an installed rule pack")
+    p_rr.add_argument("name", help="Name of the rule pack to remove.")
 
     # --- fix ---
     p_fix = sub.add_parser(
@@ -1124,6 +1142,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "fix",
         "remediate",
         "debt",
+        "install-rules",
+        "list-installed-rules",
+        "remove-rules",
     }
     if argv and not argv[0].startswith("-") and argv[0] not in known_cmds:
         argv = ["scan", *argv]
@@ -1182,6 +1203,45 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     f"{h.path:<55} {h.debt_score:>6.1f} {h.churn:>6} "
                     f"{h.bug_fix_commits:>7} {h.max_complexity:>6} {h.complexity_rank:>5} {h.sloc:>6}\n"
                 )
+        return 0
+
+    if cmd == "install-rules":
+        from pyaegis.rule_plugins import RulePluginManager
+
+        mgr = RulePluginManager()
+        try:
+            name = mgr.install(
+                args.source,
+                name=getattr(args, "name", None),
+                force=getattr(args, "force", False),
+            )
+            sys.stdout.write(f"Installed rule pack '{name}' from {args.source}\n")
+        except Exception as exc:
+            sys.stderr.write(f"install-rules failed: {exc}\n")
+            return 1
+        return 0
+    if cmd == "list-installed-rules":
+        from pyaegis.rule_plugins import RulePluginManager
+
+        mgr = RulePluginManager()
+        packs = mgr.list_installed()
+        if not packs:
+            sys.stdout.write("No community rule packs installed.\n")
+        else:
+            sys.stdout.write(f"{len(packs)} rule pack(s) installed:\n\n")
+            for p in packs:
+                sys.stdout.write(f"  {p['name']:<20} {p['source']}\n")
+                sys.stdout.write(f"  {'':20} keys: {', '.join(p.get('keys', []))}\n\n")
+        return 0
+    if cmd == "remove-rules":
+        from pyaegis.rule_plugins import RulePluginManager
+
+        mgr = RulePluginManager()
+        if mgr.remove(args.name):
+            sys.stdout.write(f"Removed rule pack '{args.name}'\n")
+        else:
+            sys.stderr.write(f"Rule pack '{args.name}' not found.\n")
+            return 1
         return 0
 
     parser.print_help(sys.stdout)
