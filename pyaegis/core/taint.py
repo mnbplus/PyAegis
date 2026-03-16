@@ -1021,6 +1021,14 @@ class TaintTracker:
                 ):
                     return True
 
+        # Walrus operator (PEP 572): (target := value)
+        # The expression evaluates to value; taint follows the value.
+        # Side-effect: target variable is also tainted — handled in _analyze_function.
+        if isinstance(expr, ast.NamedExpr):
+            return self._is_tainted_expr(
+                expr.value, tainted_vars, fnmap, callstack, tainted_params
+            )
+
         return False
 
     def _taint_unpack_target(
@@ -1141,6 +1149,19 @@ class TaintTracker:
                     node.target, ast.Name
                 ):
                     if self._is_tainted_expr(
+                        node.value, tainted_vars, fnmap, callstack, tainted_params
+                    ):
+                        tainted_vars.add(node.target.id)
+
+                # Walrus operator (PEP 572): `if x := expr:` / `while x := expr:`
+                # ast.walk visits the NamedExpr node; we update tainted_vars here
+                # so subsequent nodes in the same scope see the binding.
+                if isinstance(node, ast.NamedExpr) and isinstance(
+                    node.target, ast.Name
+                ):
+                    if self._is_sanitizer_call(node.value):
+                        tainted_vars.discard(node.target.id)
+                    elif self._is_tainted_expr(
                         node.value, tainted_vars, fnmap, callstack, tainted_params
                     ):
                         tainted_vars.add(node.target.id)
