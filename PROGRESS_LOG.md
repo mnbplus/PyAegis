@@ -1,3 +1,25 @@
+
+---
+
+## 2026-03-16 09:40 (Asia/Shanghai)
+
+**完成内容：**
+- 确认 ROADMAP P0-P4 全部落地，275 个测试通过，零回归
+- 版本号从 0.2.0 升至 **0.3.0**（pyaegis/cli.py + pyproject.toml）
+- 补写 **CHANGELOG v0.3.0**，完整记录跨模块调用图、框架感知 Source、条件约束规则引擎、LLM Auto-Remediation、增量扫描、Django CBV 追踪等全部 P1-P4 特性
+- commit 9d52176 已 push 到 main
+- 用 pip-audit 核查依赖漏洞：PyAegis 直接依赖（pyyaml 6.0.3）无已知漏洞；Dependabot moderate 告警来自 dev/docs 依赖（mkdocs-material 间接依赖），不影响运行时安全，暂不处理
+
+**遇到问题：**
+- pip-audit 扫描系统全局环境返回 38 个漏洞，均为其他项目依赖，与 PyAegis 无关；改用 pip show 逐一确认直接依赖版本
+- gh CLI 未登录，无法通过 API 查 Dependabot 详情；浏览器节点也未连接；通过 pyproject.toml 依赖树人工分析确认漏洞来源
+- PowerShell 不支持 &&，所有命令改用 Set-Location + 分号分隔
+
+**下一步：**
+- 可选：升级 mkdocs-material 或其间接依赖以消除 Dependabot 告警（pip install --upgrade mkdocs-material）
+- 可选：为 v0.3.0 打 git tag 并发布 GitHub Release
+- 可选：PRODUCT_RESEARCH.md 产品调研文档
+- 可选：pyaegis fix 端到端集成测试补全
 # PyAegis 进度日志
 
 ---
