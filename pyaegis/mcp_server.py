@@ -49,6 +49,7 @@ except ImportError as exc:  # pragma: no cover
 # ---------------------------------------------------------------------------
 try:
     from pyaegis.api import scan_code_string, scan_file as _scan_file
+
     _API_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _API_AVAILABLE = False
@@ -56,7 +57,16 @@ except ImportError:  # pragma: no cover
     _scan_file = None  # type: ignore
 
 try:
+    from pyaegis.debt import DebtAnalyser
+
+    _DEBT_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _DEBT_AVAILABLE = False
+    DebtAnalyser = None  # type: ignore
+
+try:
     from pyaegis.rules_catalog import RULES, format_explain
+
     _CATALOG_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _CATALOG_AVAILABLE = False
@@ -67,6 +77,7 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _require_api() -> None:
     if not _API_AVAILABLE:
@@ -191,6 +202,55 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": [],
             },
         ),
+        types.Tool(
+            name="scan_directory",
+            description=(
+                "Scan all Python files in a directory recursively for security "
+                "vulnerabilities. Returns aggregated JSON findings across all files."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute or relative path to the directory to scan.",
+                    },
+                    "severity_filter": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Only return findings at or above these severity levels.",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        types.Tool(
+            name="debt_analysis",
+            description=(
+                "Analyse technical debt hotspots in a Python git repository. "
+                "Combines Git commit churn frequency, bug-fix density, and "
+                "cyclomatic complexity (radon) to rank files by risk score. "
+                "Returns top hotspots and an LLM-ready refactoring prompt."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the git repository root. Defaults to current directory.",
+                    },
+                    "top": {
+                        "type": "integer",
+                        "description": "Number of top hotspots to return (default 10).",
+                    },
+                    "include_llm_prompt": {
+                        "type": "boolean",
+                        "description": "If true, include a ready-made LLM refactoring prompt in the response.",
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -286,9 +346,7 @@ async def handle_call_tool(
     # ------------------------------------------------------------------
     elif name == "list_rules":
         if not _CATALOG_AVAILABLE or not RULES:
-            return text(
-                json.dumps({"error": "Rule catalog unavailable."}, indent=2)
-            )
+            return text(json.dumps({"error": "Rule catalog unavailable."}, indent=2))
 
         rules_list = [
             {
@@ -307,6 +365,85 @@ async def handle_call_tool(
                 indent=2,
             )
         )
+
+    # ------------------------------------------------------------------
+    # scan_directory
+    # ------------------------------------------------------------------
+    elif name == "scan_directory":
+        _require_api()
+        import os
+
+        dir_path: str = args.get("path", "")
+        severity_filter = args.get("severity_filter") or None
+
+        if not dir_path or not os.path.isdir(dir_path):
+            return text(
+                json.dumps({"error": f"Directory not found: {dir_path}"}, indent=2)
+            )
+
+        py_files = [
+            os.path.join(root, f)
+            for root, _, files in os.walk(dir_path)
+            for f in files
+            if f.endswith(".py")
+        ]
+        if not py_files:
+            return text(
+                json.dumps(
+                    {"status": "clean", "findings": [], "files_scanned": 0}, indent=2
+                )
+            )
+
+        log.info("scan_directory: path=%s files=%d", dir_path, len(py_files))
+        all_findings: list[dict[str, Any]] = []
+        for fp in py_files:
+            try:
+                findings = _scan_file(
+                    fp, return_format="dict", severity_filter=severity_filter
+                )
+                all_findings.extend(findings)
+            except Exception as exc:
+                log.warning("scan_directory: skipping %s: %s", fp, exc)
+
+        result = {
+            "status": "issues_found" if all_findings else "clean",
+            "files_scanned": len(py_files),
+            "count": len(all_findings),
+            "findings": all_findings,
+        }
+        return text(json.dumps(result, indent=2, default=str))
+
+    # ------------------------------------------------------------------
+    # debt_analysis
+    # ------------------------------------------------------------------
+    elif name == "debt_analysis":
+        if not _DEBT_AVAILABLE:
+            return text(
+                json.dumps(
+                    {
+                        "error": "debt extras not installed. Run: pip install pyaegis[debt]"
+                    },
+                    indent=2,
+                )
+            )
+        import os
+
+        repo_path: str = args.get("repo_path", os.getcwd())
+        top: int = int(args.get("top", 10))
+        include_prompt: bool = bool(args.get("include_llm_prompt", False))
+
+        log.info("debt_analysis: repo=%s top=%d", repo_path, top)
+        try:
+            analyser = DebtAnalyser(repo_root=repo_path)
+            report = analyser.analyse(top=top)
+        except Exception as exc:
+            log.exception("debt_analysis failed")
+            return text(json.dumps({"error": str(exc)}, indent=2))
+
+        result = report.to_dict()
+        if include_prompt:
+            result["llm_prompt"] = report.to_llm_prompt(top=top)
+        return text(json.dumps(result, indent=2, default=str))
 
     else:
         return text(f"Unknown tool: {name}")
