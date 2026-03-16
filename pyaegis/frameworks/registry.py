@@ -3,6 +3,7 @@ from typing import Any, Dict
 from .base import FrameworkModeler
 from .flask_modeler import FlaskModeler
 from .fastapi_modeler import FastAPIModeler
+from .django_modeler import DjangoModeler
 
 _registry: Dict[str, FrameworkModeler] = {}
 
@@ -29,3 +30,4 @@ def is_route_function(func_meta: Dict[str, Any], extra_patterns=None) -> bool:
 # Auto-register built-in framework modelers.
 register(FlaskModeler())
 register(FastAPIModeler())
+register(DjangoModeler())
