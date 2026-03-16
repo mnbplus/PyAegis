@@ -1,0 +1,74 @@
+{
+  "name": "pyaegis",
+  "displayName": "PyAegis Security Scanner",
+  "description": "Lightweight Python SAST — taint analysis, vulnerability detection, and technical debt insights.",
+  "version": "0.1.0",
+  "publisher": "pyaegis",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mnbplus/PyAegis"
+  },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters", "Other"],
+  "keywords": ["python", "security", "sast", "taint", "vulnerability"],
+  "activationEvents": ["onLanguage:python"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "pyaegis.scanFile", "title": "PyAegis: Scan Current File" },
+      { "command": "pyaegis.scanWorkspace", "title": "PyAegis: Scan Workspace" },
+      { "command": "pyaegis.debtAnalysis", "title": "PyAegis: Technical Debt Analysis" },
+      { "command": "pyaegis.showOutput", "title": "PyAegis: Show Output Panel" }
+    ],
+    "configuration": {
+      "title": "PyAegis",
+      "properties": {
+        "pyaegis.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Python executable. Leave empty to auto-detect."
+        },
+        "pyaegis.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan Python files on save."
+        },
+        "pyaegis.severity": {
+          "type": "array",
+          "default": ["CRITICAL", "HIGH", "MEDIUM"],
+          "description": "Severity levels to report.",
+          "items": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] }
+        },
+        "pyaegis.rulesPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to custom rules YAML file. Leave empty to use built-in rules."
+        },
+        "pyaegis.debtMinChurn": {
+          "type": "number",
+          "default": 2,
+          "description": "Minimum git commit count to include a file in debt analysis."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        { "command": "pyaegis.scanFile", "when": "editorLangId == python", "group": "pyaegis" }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

@@ -409,6 +409,22 @@ class TaintTracker:
         # qualnames and looked up in the GlobalSymbolTable.
         self._import_map = self._build_import_map(filepath)
 
+        # Build method->class_name map from GlobalSymbolTable for this file.
+        # CFG keys are bare method names (e.g. 'handle'), but ST keys are
+        # 'module.ClassName.method'. We need this to resolve self.method() calls.
+        # _method_class_map: { bare_method_name -> class_name }
+        self._method_class_map: Dict[str, str] = {}
+        if self.symbol_table is not None:
+            abs_filepath = os.path.abspath(filepath)
+            for qualname, sym in self.symbol_table.functions.items():
+                if os.path.abspath(sym.file_path) != abs_filepath:
+                    continue
+                parts = qualname.split(".")
+                # qualname format: module.ClassName.method  (len >= 3)
+                # or ClassName.method  (len == 2)
+                if len(parts) >= 2:
+                    self._method_class_map[parts[-1]] = parts[-2]
+
         for fn_name, fnctx in fnmap.items():
             # Seed taint: if the function has a parameter named like a source root
             # (e.g. request), consider it tainted.
@@ -594,6 +610,74 @@ class TaintTracker:
         finally:
             self._current_file = prev_file
 
+    def _resolve_self_method_symbol(
+        self,
+        inst_name: str,
+        method_name: str,
+        fnctx: _FnContext,
+    ) -> "Optional[FunctionSymbol]":
+        """Try to resolve ``inst_name.method_name()`` to a FunctionSymbol.
+
+        Strategy:
+        1. If ``inst_name == 'self'``, infer the class name from the current
+           function's qualname stored in ``fnctx.name``.
+           qualname formats produced by GlobalSymbolTable:
+             - ``module.ClassName.method``  (full)
+             - ``ClassName.method``         (short key)
+           We take the second-to-last component as the class name.
+        2. Look up ``ClassName.method_name`` and
+           ``module.ClassName.method_name`` in the GlobalSymbolTable.
+        3. For non-self instance variables we skip (class unknown at static
+           analysis time without type inference).
+        """
+        if self.symbol_table is None:
+            return None
+
+        # Only handle 'self' for now; other instance vars need type inference.
+        if inst_name != "self":
+            return None
+
+        # Infer class name from fnctx.name, e.g.:
+        #   "mymod.MyClass.handle"  -> class_name = "MyClass"
+        #   "MyClass.handle"        -> class_name = "MyClass"
+        #   "handle"                -> fall back to _method_class_map
+        parts = fnctx.name.split(".")
+        if len(parts) >= 2:
+            class_name = parts[-2]  # second-to-last component
+        else:
+            # CFG keys are bare method names; use the map built in analyze_cfg
+            class_name = getattr(self, "_method_class_map", {}).get(method_name, "")
+            if not class_name:
+                # Also try looking up the caller's own name in the map
+                class_name = getattr(self, "_method_class_map", {}).get(fnctx.name, "")
+            if not class_name:
+                return None
+
+        # Try short key first: ClassName.method_name
+        short_key = f"{class_name}.{method_name}"
+        sym = self.symbol_table.get(short_key)
+        if sym is not None:
+            return sym
+
+        # Try full qualname: derive module prefix from fnctx.name
+        if len(parts) >= 3:
+            module_prefix = ".".join(parts[:-2])
+            full_key = f"{module_prefix}.{class_name}.{method_name}"
+            sym = self.symbol_table.get(full_key)
+            if sym is not None:
+                return sym
+
+        # Last resort: search by bare method name (unique only)
+        cands = self.symbol_table.get_by_name(method_name)
+        # Filter to same class if possible
+        class_cands = [s for s in cands if class_name in s.qualname]
+        if len(class_cands) == 1:
+            return class_cands[0]
+        if len(cands) == 1:
+            return cands[0]
+
+        return None
+
     def _is_tainted_expr(
         self,
         expr: ast.AST,
@@ -723,6 +807,60 @@ class TaintTracker:
             fn = self._get_full_name(expr.func)
             if fn and self._matches_any(fn, self.sanitizers):
                 return False
+
+            # Inter-procedural: self.method() instance call resolution.
+            # Pattern: self.process(tainted_arg) inside a class method.
+            # We infer the class from the current fnctx qualname and look up
+            # ClassName.method in the GlobalSymbolTable.
+            if fn and "." in fn and self.symbol_table is not None and fn not in fnmap:
+                inst_part, _, meth_part = fn.partition(".")
+                # Only handle single-level attribute calls (self.foo, not a.b.c)
+                if "." not in meth_part:
+                    # We need the current fnctx to infer class name; pass a dummy
+                    # that carries the current function's qualname. We retrieve it
+                    # from _analyze_function via a thread-local-style attribute set
+                    # below in _analyze_function. Here we fall back to fnmap keys
+                    # to find a context that contains the right class segment.
+                    _sym = None
+                    # Try all fnctx entries that look like ClassName.meth
+                    for _fn_key, _fnc in fnmap.items():
+                        candidate = self._resolve_self_method_symbol(
+                            inst_part, meth_part, _fnc
+                        )
+                        if candidate is not None:
+                            _sym = candidate
+                            break
+                    if _sym is not None:
+                        callee_tainted_params = self._map_call_tainted_params(
+                            expr,
+                            list(_sym.args),
+                            tainted_vars,
+                            fnmap,
+                            callstack,
+                            tainted_params,
+                        )
+                        max_d = self._ip.max_depth if self._ip is not None else 3
+                        if len(callstack) < max_d:
+                            if callee_tainted_params:
+                                self._analyze_symbol_if_needed(
+                                    _sym, callee_tainted_params, callstack
+                                )
+                            ext_fnmap = self._build_fnmap_for_file(_sym.file_path)
+                            return self._function_returns_tainted(
+                                fn=_sym.name,
+                                fnmap=ext_fnmap
+                                or {
+                                    _sym.name: _FnContext(
+                                        _sym.name,
+                                        list(getattr(_sym.node, "body", []) or []),
+                                        list(_sym.args),
+                                        meta={},
+                                    )
+                                },
+                                filepath=_sym.file_path,
+                                tainted_params=callee_tainted_params,
+                                callstack=callstack,
+                            )
 
             # Inter-procedural: local function
             if fn in fnmap:
@@ -984,6 +1122,28 @@ class TaintTracker:
                                     sym = self._ip.resolve_symbol(
                                         node, caller_file=self._current_file
                                     )
+                                # self.method() instance call resolution
+                                _self_method_sym = (
+                                    False  # flag: skip self arg in mapping
+                                )
+                                if (
+                                    sym is None
+                                    and sink_name
+                                    and "." in sink_name
+                                    and self.symbol_table is not None
+                                ):
+                                    _inst, _, _meth = sink_name.partition(".")
+                                    if "." not in _meth:
+                                        for _fnc in fnmap.values():
+                                            _candidate = (
+                                                self._resolve_self_method_symbol(
+                                                    _inst, _meth, _fnc
+                                                )
+                                            )
+                                            if _candidate is not None:
+                                                sym = _candidate
+                                                _self_method_sym = True
+                                                break
                                 # Fallback: resolve via import_map directly
                                 if (
                                     sym is None
@@ -1004,9 +1164,18 @@ class TaintTracker:
                                             if len(cands) == 1:
                                                 sym = cands[0]
                                 if sym is not None:
+                                    # For self.method() calls, skip the implicit
+                                    # 'self' parameter when mapping positional args.
+                                    _callee_args = list(sym.args)
+                                    if (
+                                        _self_method_sym
+                                        and _callee_args
+                                        and _callee_args[0] == "self"
+                                    ):
+                                        _callee_args = _callee_args[1:]
                                     callee_tp = self._map_call_tainted_params(
                                         node,
-                                        list(sym.args),
+                                        _callee_args,
                                         tainted_vars,
                                         fnmap,
                                         callstack,
