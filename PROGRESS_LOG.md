@@ -143,3 +143,22 @@
 - 利用新的类方法索引，在 TaintTracker 中支持实例方法调用追踪（self.method() 形式）
 - 推进 ROADMAP P1：框架感知 Source 自动发现（FastAPI/Django 完整覆盖）
 - 可选：创建 PRODUCT_RESEARCH.md 产品调研文档
+
+## 2026-03-16 10:10 (Asia/Shanghai)
+
+**完成内容：**
+- 实现 ROADMAP P1：FastAPI 显式 Source 标注识别
+  - 新增 _FASTAPI_SOURCE_CALLS frozenset，覆盖 Query(), Body(), Header(), Path(), Form(), Cookie(), File(), UploadFile 及其 fully-qualified / starlette 变体
+  - 新增 _is_fastapi_source_call() 方法，支持 import alias 解析（如 rom fastapi import Query as Q）
+  - 更新 _extract_source_params 同时调用 _is_depends_call 和 _is_fastapi_source_call，正向/关键字参数均覆盖
+  - 新增 10 个测试（Query/Body/Header/Path/Form/Cookie/File、alias import、sanitizer 抑制、混合 Depends+Query）
+  - 全套 288 个测试通过，零回归
+- commit 7e80280 已 push 到 main
+
+**遇到问题：**
+- pre-commit black 自动格式化两个文件，flake8 拦截未使用的 pytest import，清理后重新提交成功
+
+**下一步：**
+- TaintTracker 中支持实例方法调用追踪（self.method() 形式），利用 GlobalSymbolTable 类方法索引
+- ROADMAP P1 剩余：Django ORM raw() vs filter() 语义区分
+- 可选：PRODUCT_RESEARCH.md 产品调研文档
