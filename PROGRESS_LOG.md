@@ -1,34 +1,41 @@
-<!-- This file is auto-appended by PyAegis cron reporter -->
+# PyAegis 进度日志
 
 ---
 
-## 2026-03-16 01:30 进度报告
+## 2026-03-16 07:35 (Asia/Shanghai)
 
-**时间戳**：2026-03-16 01:30 (Asia/Shanghai)
+**完成内容：**
+- 扩充跨模块 sanitizer 截断链路测试，在 `tests/test_cross_module.py` 新增 3 个场景：
+  1. sanitizer → wrapper → sink：clean 值经包装仍保持 clean（不误报）
+  2. callee 内部先 sanitize 再 sink：应不报
+  3. 补齐已有跨模块 sanitizer 截断场景，修复 lint
+- 所有测试通过（pytest exit code 0）
+- commit `1b93e033` 已 push 到 main
 
-### 完成内容（本轮 cron 周期内）
+**遇到问题：**
+- 尝试为 call graph 添加类方法/装饰器支持，但会破坏 interprocedural/cross_module 现有测试（symbol table key 索引方式变化），已回退，避免引入回归
 
-- `aegis-mcp-research`：完成 `pyaegis/mcp_server.py`（4工具：scan_code/scan_file/explain_finding/list_rules）+ `docs/mcp-integration.md`，commit f2206d3，**未 push**（已在上一轮 cron 之后由主会话确认 push）
-- `aegis-next`（8463bb69）：清理 benchmark_report.json 不再被 git 跟踪，.gitignore 补全，commit b2a1e18，已 push
-- `aegis-next`（466abfdc）：正在运行中（最新动作：`git log -1 --oneline`，尚未完成）
-- `aegis-ci-fix`：修复 `TaintTracker._is_tainted_expr()` ast.Attribute 顺序 bug，全平台 CI 测试修复，commit c03e4ca，已 push
+**下一步：**
+- 重新设计类方法/装饰器支持方案，确保不破坏现有测试
+- 推进 PRODUCT_RESEARCH.md 的产品调研文档（当前不存在）
+- 继续扩展污点分析核心能力
 
-### GitHub 最新5条提交（远端 main）
+## 2026-03-16 08:30 (Asia/Shanghai)
 
-| SHA | 时间 | 消息 |
-|-----|------|------|
-| b2a1e18 | 2026-03-15 17:20 | chore: ignore benchmark_report.json artifact |
-| 5bf1582 | 2026-03-15 17:10 | fix(ci): install dev deps in benchmark job |
-| c03e4ca | 2026-03-15 17:00 | fix: resolve CI test failures across Python 3.9-3.12 |
-| 4785c88 | 2026-03-15 16:59 | fix(rules): add ET.* alias sinks for xml.etree.ElementTree import as ET |
-| 5e9bd7d | 2026-03-15 16:48 | fix(rules): include subprocess glob in default sinks; unskip symbol table tests |
+**完成内容：**
+- 重新设计并实现 GlobalSymbolTable 类方法索引支持
+- 新增 _register_function() 辅助方法，统一处理顶层函数和类方法注册
+- 新增 _register_class_methods()，遍历 ast.ClassDef 体，注册全部方法
+- qualname 格式：module.ClassName.method_name（顶层函数格式不变，零回归）
+- by-name 索引和 by-file 索引同步更新，get_by_name() 对类方法正常工作
+- 新增 4 个测试：qualname 查找、args 含 self、get_by_name、跨模块 dao 场景
+- 全套 234 个测试通过，commit 5f1a3d1
 
-### 遇到问题
+**遇到问题：**
+- 第一次 edit 工具调用未生效（oldText 有隐形字符差异），第二次精准替换成功
+- 测试里误留了未使用的 import，pre-commit flake8 拦截，已清理
 
-- `aegis-next`（466abfdc）会话最后一条是 tool call（exec git log），无 stop 消息，状态不明确——可能仍在运行或已卡住
-- `sessions_history(sessionKey: 'aegis-next')` 无法用 label 直接查询，需要用完整 session key
-
-### 下一步
-
-- 新 spawn `aegis-next` agent 继续推进 ROADMAP 未完成项（Visitor Pattern 重构 / inter-procedural 深度集成）
-- 关注 CI 是否全绿（benchmark job + test job）
+**下一步：**
+- 利用新的类方法索引，在 TaintTracker 中支持实例方法调用追踪（self.method() 形式）
+- 推进 ROADMAP P1：框架感知 Source 自动发现（FastAPI/Django 完整覆盖）
+- 可选：创建 PRODUCT_RESEARCH.md 产品调研文档
