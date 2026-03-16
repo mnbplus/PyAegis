@@ -1,5 +1,5 @@
 import fnmatch
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from .base import FrameworkModeler
 
@@ -39,3 +39,16 @@ class FastAPIModeler(FrameworkModeler):
                 if fnmatch.fnmatch(str(dec), pat) or str(dec) == pat:
                     return True
         return False
+
+    def get_tainted_params(self, func_meta: Dict[str, Any]) -> List[str]:
+        """Return tainted params for a FastAPI route handler.
+
+        FastAPI injects path/query params and Depends() results as function
+        arguments.  All non-self parameters (including those surfaced via
+        ``source_params`` by the parser) are considered tainted.
+        """
+        args: List[str] = func_meta.get("args", []) or []
+        source_params: List[str] = func_meta.get("source_params", []) or []
+        tainted = {a for a in args if a != "self"}
+        tainted.update(source_params)
+        return list(tainted)

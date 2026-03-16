@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from .base import FrameworkModeler
 from .flask_modeler import FlaskModeler
@@ -25,6 +25,35 @@ def is_route_function(func_meta: Dict[str, Any], extra_patterns=None) -> bool:
         if modeler.is_route_function(func_meta):
             return True
     return False
+
+
+def get_tainted_params(func_meta: Dict[str, Any]) -> List[str]:
+    """Return the tainted parameter names for a route function.
+
+    Queries *all* registered modelers that recognise the function and merges
+    their results.  This ensures that e.g. FastAPI's ``source_params`` are
+    included even when a modeler with overlapping route patterns (Flask) also
+    matches.
+
+    Returns an empty list when no modeler recognises the function, signalling
+    the caller to fall back to tainting all non-self arguments.
+
+    Args:
+        func_meta: Function metadata dict passed to framework modelers.
+
+    Returns:
+        Deduplicated list of parameter names to taint, or ``[]`` for "taint all".
+    """
+    seen: Dict[str, None] = {}  # ordered set via insertion-order dict
+    matched = False
+    for modeler in _registry.values():
+        if modeler.is_route_function(func_meta):
+            matched = True
+            for p in modeler.get_tainted_params(func_meta):
+                seen[p] = None
+    if not matched:
+        return []
+    return list(seen)
 
 
 # Auto-register built-in framework modelers.

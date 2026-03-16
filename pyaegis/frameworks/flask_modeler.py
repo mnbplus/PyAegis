@@ -1,5 +1,5 @@
 import fnmatch
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from .base import FrameworkModeler
 
@@ -33,3 +33,13 @@ class FlaskModeler(FrameworkModeler):
                 if fnmatch.fnmatch(str(dec), pat) or str(dec) == pat:
                     return True
         return False
+
+    def get_tainted_params(self, func_meta: Dict[str, Any]) -> List[str]:
+        """Return tainted params for a Flask route handler.
+
+        Flask injects URL path variables as keyword arguments; the implicit
+        ``flask.request`` global is *not* a parameter, so all explicit
+        non-self parameters are URL kwargs and should be tainted.
+        """
+        args: List[str] = func_meta.get("args", []) or []
+        return [a for a in args if a != "self"]

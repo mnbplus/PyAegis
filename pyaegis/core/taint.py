@@ -434,13 +434,26 @@ class TaintTracker:
                     tainted_vars.add(arg)
 
             # Framework-aware: if function is decorated with a route decorator,
-            # all its args are considered tainted (they come from HTTP requests).
+            # use the framework modeler to determine exactly which params are tainted.
+            # Falls back to all non-self args when no modeler returns a specific list.
             if self._fn_has_route_decorator(fnctx, fnctx.meta):
-                for arg in fnctx.args:
-                    if arg != "self":
-                        tainted_vars.add(arg)
+                from pyaegis.frameworks.registry import (
+                    get_tainted_params as _get_tainted_params,
+                )
+
+                func_meta = fnctx.meta if isinstance(fnctx.meta, dict) else {}
+                precise = _get_tainted_params(func_meta)
+                if precise:
+                    tainted_vars.update(precise)
+                else:
+                    # No framework override — taint all non-self args (safe fallback)
+                    for arg in fnctx.args:
+                        if arg != "self":
+                            tainted_vars.add(arg)
 
             # FastAPI Depends() injection: treat Depends parameters as tainted sources
+            # (already handled by FastAPIModeler.get_tainted_params; kept here as an
+            # explicit belt-and-suspenders pass for any non-FastAPI Depends patterns).
             if isinstance(fnctx.meta, dict):
                 for dep in fnctx.meta.get("source_params", []) or []:
                     if dep != "self":
