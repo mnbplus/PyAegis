@@ -1,0 +1,48 @@
+# PyAegis Community Rule Pack Example
+# Install with: pyaegis install-rules ./examples/community-rules-example.yml --name example
+#
+# This file demonstrates the rule pack format.
+# Community rule packs extend the built-in rules with additional
+# sources, sinks, sanitizers, and conditional constraints.
+
+# Additional taint sources (user-controlled inputs)
+inputs:
+  - environ.get          # os.environ.get() as taint source
+  - getenv               # os.getenv()
+  - argv                 # sys.argv
+  - configparser.get     # config file values
+  - dotenv.values        # python-dotenv
+
+# Additional dangerous sinks
+sinks:
+  - ldap.search          # LDAP injection
+  - ldap3.search
+  - smtplib.sendmail     # Email header injection
+  - jinja2.Template      # Server-side template injection
+  - mako.template.Template
+  - logging.critical     # Log injection
+  - logging.warning
+  - paramiko.exec_command  # SSH command injection
+  - fabric.run
+  - invoke.run
+
+# Additional sanitizers
+sanitizers:
+  - ldap3.utils.dn.escape_dn_chars
+  - email.utils.parseaddr
+  - markupsafe.escape
+  - bleach.linkify
+  - defusedxml.parse
+
+# Conditional sinks (only flag when condition is met)
+conditional_sinks:
+  - name: logging.debug
+    severity: LOW
+    conditions:
+      - contains_format: true  # only flag if string formatting is used
+
+# Framework-specific source decorators
+source_decorators:
+  - celery.task          # Celery task arguments
+  - dramatiq.actor       # Dramatiq actor arguments
+  - rq.job               # RQ job arguments

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased - 0.3.1]
+
+### 🚀 Added
+- **本地 RAG 引擎 (`pyaegis.rag`)**: 基于 sqlite-vec 的零运维语义代码搜索。索引 Python 代码块（函数/类级别），支持 ANN 向量搜索（有 sqlite-vec 时）或纯 Python cosine 降级。`pip install pyaegis[rag]`。
+- **MCP server 新增工具**: `search_code`（语义搜索代码库）和 `index_codebase`（索引目录），MCP 工具总数达到 **8 个**。
+- **社区规则插件化 (`pyaegis rule_plugins`)**: `pyaegis install-rules <url>` 从 URL 或本地路径安装社区 YAML 规则包，`list-installed-rules` 查看，`remove-rules` 卸载。零依赖，纯标准库实现。
+- **VS Code 扩展骨架 (`vscode-extension/`)**: TypeScript + VS Code API，支持保存时自动扫描、inline 诊断标注、工作区扫描、技术债务分析面板。编译通过，待发布 marketplace。
+- **技术债务分析 (`pyaegis debt`)**: Git churn + radon 圈复杂度，输出高风险热点，支持 JSON 和 LLM prompt 导出。
+- **`pyaegis/__init__.py` 懒加载**: `CodeRAG`、`DebtAnalyser`、`RulePluginManager` 通过 `__getattr__` 懒加载，不强制安装额外依赖。
+- **SARIF 修复**: 补全 `originalUriBaseIds` 声明，修复 GitHub Code Scanning 上传失败问题。
+- **Discord 频道**: OpenClaw 接入 Discord Bot。
+
+### 🛠️ Infrastructure
+- `pyproject.toml` 新增 `[rag]` 和 `[debt]` 可选依赖组。
+- pre-commit hooks 全部通过，无格式化债务。
+
+---
+
 ## [0.3.0] - 2026-03-16
 
 ### 🚀 Added
