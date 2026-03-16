@@ -88,3 +88,101 @@ def test_call_graph_ambiguous_bare_name_returns_none(tmp_path):
 
     assert ip.resolve_call_qualname(call, caller_file=str(c)) == "dup"
     assert ip.resolve_symbol(call, caller_file=str(c)) is None
+
+
+def test_class_method_indexed_by_qualname(tmp_path):
+    """Methods inside a class should be indexed as module.ClassName.method_name."""
+    mod = _write(
+        tmp_path,
+        "service.py",
+        """
+        class UserService:
+            def get_user(self, user_id):
+                return user_id
+
+            def delete_user(self, user_id):
+                pass
+
+        def standalone(x):
+            return x
+        """,
+    )
+
+    gst = GlobalSymbolTable.build([str(mod)], root_dir=str(tmp_path))
+
+    # Class methods should be indexed under module.Class.method
+    assert gst.get("service.UserService.get_user") is not None
+    assert gst.get("service.UserService.delete_user") is not None
+    # Top-level function should still work
+    assert gst.get("service.standalone") is not None
+    # Non-existent should return None
+    assert gst.get("service.UserService.nonexistent") is None
+
+
+def test_class_method_args_include_self(tmp_path):
+    """Method FunctionSymbol.args should include self."""
+    mod = _write(
+        tmp_path,
+        "svc.py",
+        """
+        class Handler:
+            def process(self, request, data):
+                pass
+        """,
+    )
+
+    gst = GlobalSymbolTable.build([str(mod)], root_dir=str(tmp_path))
+    sym = gst.get("svc.Handler.process")
+    assert sym is not None
+    assert sym.args == ["self", "request", "data"]
+
+
+def test_class_method_get_by_name(tmp_path):
+    """get_by_name() should return class methods by bare method name."""
+    mod = _write(
+        tmp_path,
+        "repo.py",
+        """
+        class UserRepo:
+            def find(self, uid):
+                return uid
+        """,
+    )
+
+    gst = GlobalSymbolTable.build([str(mod)], root_dir=str(tmp_path))
+    results = gst.get_by_name("find")
+    assert len(results) == 1
+    assert results[0].qualname == "repo.UserRepo.find"
+
+
+def test_class_method_taint_across_modules(tmp_path):
+    """Taint should propagate into a class method sink in another module."""
+    _write(
+        tmp_path,
+        "dao.py",
+        """
+        import os
+
+        class QueryRunner:
+            def run(self, query):
+                os.system(query)
+        """,
+    )
+    _write(
+        tmp_path,
+        "view.py",
+        """
+        from dao import QueryRunner
+
+        def handle(request):
+            q = request.args.get("q")
+            runner = QueryRunner()
+            runner.run(q)
+        """,
+    )
+
+    fps = [str(tmp_path / "dao.py"), str(tmp_path / "view.py")]
+    gst = GlobalSymbolTable.build(fps, root_dir=str(tmp_path))
+
+    # dao.QueryRunner.run should be indexed
+    assert gst.get("dao.QueryRunner.run") is not None

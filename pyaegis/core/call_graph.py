@@ -173,23 +173,75 @@ class GlobalSymbolTable:
         self._imports_by_file[raw_fp] = dict(imports_map)
         self._imports_by_file[abspath] = dict(imports_map)
 
-        # Register only top-level function defs.
+        # Register top-level function defs AND class methods.
         body = getattr(tree, "body", None) or []
         for node in body:
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            args = [a.arg for a in node.args.args]
-            qual = f"{mod}.{node.name}" if mod else node.name
-            sym = FunctionSymbol(
-                name=node.name,
-                qualname=qual,
-                file_path=abspath,
-                node=node,
-                args=args,
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._register_function(node, mod, abspath, class_name=None)
+            elif isinstance(node, ast.ClassDef):
+                self._register_class_methods(node, mod, abspath)
+
+    def _register_function(
+        self,
+        node: ast.AST,
+        mod: str,
+        abspath: str,
+        *,
+        class_name: Optional[str],
+    ) -> None:
+        """Index a single FunctionDef/AsyncFunctionDef node.
+
+        For top-level functions:  qualname = ``module.func``
+        For class methods:        qualname = ``module.ClassName.method``
+
+        The *by-name* index always uses the bare function name so that
+        ``get_by_name()`` still works for both forms.
+        """
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return
+        # Collect all parameter names (pos-only, regular, kw-only).
+        args: List[str] = []
+        args.extend(a.arg for a in getattr(node.args, "posonlyargs", []))
+        args.extend(a.arg for a in node.args.args)
+        args.extend(a.arg for a in node.args.kwonlyargs)
+
+        if class_name:
+            qual = (
+                f"{mod}.{class_name}.{node.name}"
+                if mod
+                else f"{class_name}.{node.name}"
             )
-            self._by_qualname[qual] = sym
-            self._by_name.setdefault(node.name, []).append(sym)
-            self._by_file[abspath][node.name] = sym
+        else:
+            qual = f"{mod}.{node.name}" if mod else node.name
+
+        sym = FunctionSymbol(
+            name=node.name,
+            qualname=qual,
+            file_path=abspath,
+            node=node,
+            args=args,
+        )
+        self._by_qualname[qual] = sym
+        self._by_name.setdefault(node.name, []).append(sym)
+        # _by_file is keyed by bare name for backward compat with functions_in_file().
+        self._by_file[abspath][node.name] = sym
+
+        # For methods, also store under ``ClassName.method`` so callers that
+        # already have the class prefix can look them up directly.
+        if class_name:
+            scoped_key = f"{class_name}.{node.name}"
+            self._by_file[abspath][scoped_key] = sym
+
+    def _register_class_methods(
+        self,
+        class_node: ast.ClassDef,
+        mod: str,
+        abspath: str,
+    ) -> None:
+        """Index all methods defined directly in a class body."""
+        for item in class_node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._register_function(item, mod, abspath, class_name=class_node.name)
 
     def get(self, qualname: str) -> Optional[FunctionSymbol]:
         return self._by_qualname.get(qualname)
