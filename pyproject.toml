@@ -33,6 +33,9 @@ debt = [
     "radon>=6.0.0",
     "sqlite-vec>=0.1.6",
 ]
+rag = [
+    "sqlite-vec>=0.1.6",
+]
 dev = [
     "openai>=1.0.0",
     "radon>=6.0.0",
