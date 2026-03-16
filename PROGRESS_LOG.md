@@ -2,6 +2,29 @@
 
 ---
 
+## 2026-03-16 09:10 (Asia/Shanghai)
+
+**完成内容：**
+- 实现框架感知精确污染参数注入（commit `4f3a613`）
+  - `registry.py` 新增 `get_tainted_params()` 聚合函数，合并所有匹配 modeler 的结果（解决 Flask/FastAPI 路由模式重叠时 source_params 丢失问题）
+  - `FlaskModeler.get_tainted_params()`：返回所有非 self URL kwargs
+  - `FastAPIModeler.get_tainted_params()`：合并 args + source_params，去重
+  - `DjangoModeler.get_tainted_params()`：已有实现，无需修改
+  - `taint.py analyze_cfg`：路由函数分支改为调用框架接口精确污染，无结果时才回退到全量非 self 参数
+- 新增 19 个测试（`tests/test_precise_taint_params.py`），全部通过，零回归（总计 269 个测试）
+
+**遇到问题：**
+- registry.py edit 时 docstring 首行 `"""` 丢失导致 IndentationError，直接覆写修复
+- registry 首次实现只取第一个匹配 modeler，Flask 先注册导致 FastAPI source_params 被跳过；改为合并所有匹配 modeler 结果后修复
+- 测试文件中间有重复 import 被 flake8 拦截（E402），整理到顶部后通过
+
+**下一步：**
+- 推进 ROADMAP P1：Django CBV 跨方法 self.request 污染追踪
+- TaintTracker 中支持实例方法调用追踪（self.method() 形式）
+- 可选：创建 PRODUCT_RESEARCH.md 产品调研文档
+
+---
+
 ## 2026-03-16 09:02 (Asia/Shanghai)
 
 **完成内容：**
