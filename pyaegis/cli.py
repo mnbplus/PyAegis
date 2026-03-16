@@ -47,7 +47,7 @@ logging.basicConfig(
 logger = logging.getLogger("pyaegis")
 
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 BANNER = r"""

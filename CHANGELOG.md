@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-16
+
+### 🚀 Added
+- **跨模块调用图 (P0 - Inter-procedural Call Graph)**: 实现 `GlobalSymbolTable` 与跨文件调用图，支持跨模块污点追踪，彻底消除跨文件假阴性。
+- **框架感知 Source 自动发现 (P1 - Framework-aware Sources)**: 新增 `FlaskModeler`、`FastAPIModeler`、`DjangoModeler`，自动识别路由函数并精确注入污点参数，支持 FBV/CBV/DRF `@api_view` 等 20+ 种装饰器模式。
+- **条件约束规则引擎 (P2 - Conditional Sink Rules)**: `conditional_sinks` 配置项支持参数级约束（如 `subprocess.run(shell=False)` 不报警），大幅降低误报率。
+- **LLM Auto-Remediation (P3)**: `LLMRemediationEngine` 通过 DeepSeek/OpenAI 兼容接口为每个漏洞生成 unified-diff 补丁，`pyaegis fix` / `pyaegis remediate --llm --apply` 可直接写回源文件。
+- **增量分析缓存 (P4 - Incremental Scan)**: `pyaegis scan --incremental` 结合 `get_changed_files` + `get_affected_files`，仅重新分析 git diff 涉及的文件及其依赖，大型项目 CI 速度大幅提升。
+- **Django CBV `self.request` 跨方法污染追踪**: 进入 CBV HTTP 方法时预种 `self.request`，并新增接收者污点传播规则，正确处理 `self.request.GET.get(...)` 链式调用。
+- **`GlobalSymbolTable` 类方法索引**: 支持 `module.ClassName.method_name` qualname 格式，`get_by_name()` 对类方法跨模块查找正常工作。
+- **技术债务分析 (`pyaegis debt`)**: 结合 Git churn 与圈复杂度，输出高风险热点文件列表，支持 JSON 输出与 LLM prompt 导出。
+- **VS Code 扩展接口**: 新增 VS Code extension 骨架与 intel sample store 集成。
+
+### 🛠️ Infrastructure & Testing
+- 测试套件从 ~100 增长至 **275 个测试**，覆盖跨模块、框架感知、CBV、精确污点注入、增量扫描等全部新特性，零回归。
+- 清理项目根目录 11 个遗留调试/临时脚本（约 947 行无效代码）。
+- `GlobalSymbolTable` 支持 `by-name` 与 `by-file` 双索引，类方法与顶层函数统一注册路径。
+- pre-commit hooks（black + flake8）在所有新提交中严格执行，无格式化债务。
+
+### 🔧 Changed
+- `TaintTracker.analyze_cfg`：路由函数分支改为优先调用框架 `get_tainted_params()` 精确污染，无结果时回退到全量非 self 参数。
+- `FrameworkRegistry.get_tainted_params()`：合并所有匹配 modeler 结果（解决 Flask/FastAPI 路由模式重叠时 source_params 丢失问题）。
+- 版本号升至 `0.3.0`。
+
+---
+
 ## [0.2.0] - 2026-03-15
 
 ### 🚀 Added
