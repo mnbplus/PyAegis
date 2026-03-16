@@ -2,6 +2,27 @@
 
 ---
 
+## 2026-03-16 09:20 (Asia/Shanghai)
+
+**完成内容：**
+- 实现 Django CBV `self.request` 跨方法污染追踪（commit `ef34542`）
+  - `taint.py _analyze_function`：在进入任意 CBV HTTP 方法（get/post/put/patch/delete/head/options/trace）时，预种 `_instance_taints["self"]["request"]`，模拟 Django `View.setup()` 的 `self.request = request` 赋值行为
+  - `taint.py _is_tainted_expr`：新增「污点接收者传播」规则——当方法调用的 receiver（`obj.method()`）本身是污点时，调用返回值也视为污点。解决 `self.request.GET.get('key')` 这类链式调用无法传播污点的问题
+  - 新增 10 个测试（`tests/test_django_cbv_self_request.py`），覆盖全部 8 个 HTTP 动词、sanitizer 截断、FBV 回归、CBV+FBV 混合场景，全部通过
+  - 全量 275 个测试通过，零回归
+
+**遇到问题：**
+- `PyASTParser()` 需要 `filepath` 参数，测试 helper 改为写临时文件后解析
+- CBV `self.request` 预种后，`self.request.GET.get('cmd')` 仍不报——因为 `.get()` 是 `ast.Call`，走 inter-procedural 路径找不到符号就返回 False；加入 receiver 污点传播规则后修复
+- pre-commit black 格式化两个文件，re-add 后重新提交
+
+**下一步：**
+- TaintTracker 中支持实例方法调用追踪（`self.method()` 形式，无 GlobalSymbolTable 时的轻量路径）
+- 推进 ROADMAP P2：强化规则引擎条件约束（`subprocess.run(cmd, shell=False)` 误报消除）
+- 可选：PRODUCT_RESEARCH.md 产品调研文档
+
+---
+
 ## 2026-03-16 09:10 (Asia/Shanghai)
 
 **完成内容：**
