@@ -176,6 +176,31 @@ class PyASTParser:
 
         return decorator_names, routes
 
+    # FastAPI explicit source constructors — all represent user-controlled input
+    _FASTAPI_SOURCE_CALLS = frozenset(
+        {
+            "Query",
+            "Body",
+            "Header",
+            "Path",
+            "Form",
+            "Cookie",
+            "File",
+            "UploadFile",
+            # Fully-qualified variants (fastapi.Query, etc.)
+            "fastapi.Query",
+            "fastapi.Body",
+            "fastapi.Header",
+            "fastapi.Path",
+            "fastapi.Form",
+            "fastapi.Cookie",
+            "fastapi.File",
+            "fastapi.UploadFile",
+            # starlette aliases
+            "starlette.datastructures.UploadFile",
+        }
+    )
+
     def _extract_source_params(
         self,
         func_node: ast.AST,
@@ -183,16 +208,26 @@ class PyASTParser:
     ) -> List[str]:
         """Extract parameters that should be treated as tainted sources.
 
-        Currently focuses on FastAPI-style dependency injection:
-          def endpoint(
-              user_id: str,
-              user=Depends(get_user),
-              token: str = Depends(auth),
-          )
+        Recognises two categories of FastAPI tainted parameters:
+
+        1. Dependency injection via ``Depends()``:
+             def endpoint(user=Depends(get_user), token: str = Depends(auth))
+
+        2. Explicit FastAPI source annotations (user-controlled input):
+             def endpoint(
+                 q: str = Query(...),
+                 body: MyModel = Body(...),
+                 x_token: str = Header(None),
+                 item_id: int = Path(...),
+                 username: str = Form(...),
+                 session: str = Cookie(None),
+                 file: bytes = File(...),
+                 upload: UploadFile = File(...),
+             )
 
         We treat the *parameter name* as a taint source when its default
-        value is a call to fastapi.Depends / starlette.Depends (directly or
-        via imported alias).
+        value is a call to fastapi.Depends / starlette.Depends OR one of
+        the FastAPI explicit source constructors (directly or via alias).
         """
         if not isinstance(func_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return []
@@ -212,7 +247,9 @@ class PyASTParser:
         for param, default in zip(params, defaults):
             if default is None:
                 continue
-            if self._is_depends_call(default, import_map):
+            if self._is_depends_call(
+                default, import_map
+            ) or self._is_fastapi_source_call(default, import_map):
                 out.append(param.arg)
 
         # keyword-only parameters
@@ -221,7 +258,9 @@ class PyASTParser:
         for param, default in zip(kwonlyargs, kw_defaults):
             if default is None:
                 continue
-            if self._is_depends_call(default, import_map):
+            if self._is_depends_call(
+                default, import_map
+            ) or self._is_fastapi_source_call(default, import_map):
                 out.append(param.arg)
 
         return out
@@ -245,6 +284,38 @@ class PyASTParser:
         if import_map and fn_name in import_map:
             mapped = import_map.get(fn_name, "")
             if mapped.endswith(".Depends") or mapped == "Depends":
+                return True
+
+        return False
+
+    def _is_fastapi_source_call(
+        self,
+        node: ast.AST,
+        import_map: Optional[Dict[str, str]] = None,
+    ) -> bool:
+        """Return True if node is a FastAPI explicit source constructor.
+
+        Matches calls like ``Query(...)``, ``Body(...)``, ``Header(None)``,
+        ``Path(...)``, ``Form(...)``, ``Cookie(None)``, ``File(...)``,
+        and their fully-qualified / aliased forms.
+        """
+        if not isinstance(node, ast.Call):
+            return False
+        fn_name = self._get_full_name(node.func)
+        if not fn_name:
+            return False
+
+        if fn_name in self._FASTAPI_SOURCE_CALLS:
+            return True
+
+        # Resolve import alias, e.g. ``from fastapi import Query as Q``
+        if import_map:
+            resolved = import_map.get(fn_name, "")
+            if resolved in self._FASTAPI_SOURCE_CALLS:
+                return True
+            # Also match suffix: fastapi.Query -> ends with known name
+            short = resolved.split(".")[-1] if resolved else ""
+            if short and f"fastapi.{short}" in self._FASTAPI_SOURCE_CALLS:
                 return True
 
         return False
