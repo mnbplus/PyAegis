@@ -1,11 +1,9 @@
 # New tests for P0 cross-module taint propagation
 import os
 import textwrap
-import tempfile
-import pytest
 import ast
 
-from pyaegis.core.parser import PyASTParser, ParallelProjectParser
+from pyaegis.core.parser import PyASTParser
 from pyaegis.core.taint import TaintTracker
 from pyaegis.core.call_graph import GlobalSymbolTable, InterproceduralTaintTracker
 
@@ -89,7 +87,9 @@ class TestCrossModuleTaint:
         tracker.analyze_cfg(cfg, filepath=b_path)
 
         findings = tracker.get_findings()
-        assert len(findings) >= 1, "Should detect cross-module taint flow from a.get_cmd to os.system"
+        assert (
+            len(findings) >= 1
+        ), "Should detect cross-module taint flow from a.get_cmd to os.system"
 
     def test_cross_module_wrapper_chain(self, tmp_path):
         """
@@ -121,7 +121,9 @@ class TestCrossModuleTaint:
         gst = GlobalSymbolTable(root_dir=tmp_dir)
         for name, code in files.items():
             path = str(tmp_path / name)
-            (tmp_path / name).write_text(textwrap.dedent(code).lstrip("\n"), encoding="utf-8")
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
             parser = PyASTParser(path)
             tree = parser.parse()
             gst.register_file(path, tree)
@@ -175,7 +177,9 @@ class TestCrossModuleTaint:
         gst = GlobalSymbolTable(root_dir=tmp_dir)
         for name, code in files.items():
             path = str(tmp_path / name)
-            (tmp_path / name).write_text(textwrap.dedent(code).lstrip("\n"), encoding="utf-8")
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
             parser = PyASTParser(path)
             tree = parser.parse()
             gst.register_file(path, tree)
@@ -194,9 +198,13 @@ class TestCrossModuleTaint:
         tracker.analyze_cfg(cfg, filepath=main_path)
 
         findings = tracker.get_findings()
-        assert len(findings) >= 1, "Should detect sink in helper module when called with tainted arg"
+        assert (
+            len(findings) >= 1
+        ), "Should detect sink in helper module when called with tainted arg"
         # The finding should be in helper.py (where the sink is)
-        assert any("helper" in f.file_path for f in findings), "Finding should reference helper.py"
+        assert any(
+            "helper" in f.file_path for f in findings
+        ), "Finding should reference helper.py"
 
     def test_cross_module_sanitizer_breaks_taint(self, tmp_path):
         """
@@ -224,7 +232,9 @@ class TestCrossModuleTaint:
         gst = GlobalSymbolTable(root_dir=tmp_dir)
         for name, code in files.items():
             path = str(tmp_path / name)
-            (tmp_path / name).write_text(textwrap.dedent(code).lstrip("\n"), encoding="utf-8")
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
             parser = PyASTParser(path)
             tree = parser.parse()
             gst.register_file(path, tree)
@@ -245,6 +255,108 @@ class TestCrossModuleTaint:
 
         findings = tracker.get_findings()
         assert len(findings) == 0, "Sanitizer should break cross-module taint"
+
+    def test_cross_module_sanitizer_breaks_taint_through_wrapper(self, tmp_path):
+        """Sanitizer return should stay clean through an extra wrapper module."""
+        files = {
+            "sanitizer.py": """
+                import html
+
+                def sanitize(data):
+                    return html.escape(data)
+            """,
+            "wrap.py": """
+                from sanitizer import sanitize
+
+                def clean(data):
+                    return sanitize(data)
+            """,
+            "main.py": """
+                import os
+                from wrap import clean
+
+                def endpoint(req):
+                    user_input = req.args.get('x')
+                    safe = clean(user_input)
+                    os.system(safe)
+            """,
+        }
+
+        tmp_dir = str(tmp_path)
+        gst = GlobalSymbolTable(root_dir=tmp_dir)
+        for name, code in files.items():
+            path = str(tmp_path / name)
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
+            parser = PyASTParser(path)
+            tree = parser.parse()
+            gst.register_file(path, tree)
+
+        main_path = str(tmp_path / "main.py")
+        parser = PyASTParser(main_path)
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = TaintTracker(
+            sources=["request", "req", "request.args", "req.args"],
+            sinks=["os.system"],
+            sanitizers=["html.escape"],
+            symbol_table=gst,
+            max_call_depth=4,
+        )
+        tracker.analyze_cfg(cfg, filepath=main_path)
+
+        findings = tracker.get_findings()
+        assert len(findings) == 0
+
+    def test_cross_module_sanitizer_blocks_sink_in_callee_chain(self, tmp_path):
+        """Even when sink is in a callee module, sanitizer inside that callee should block."""
+        files = {
+            "execmod.py": """
+                import os
+                import html
+
+                def execute(data):
+                    safe = html.escape(data)
+                    os.system(safe)
+            """,
+            "main.py": """
+                from execmod import execute
+
+                def endpoint(req):
+                    user_input = req.args.get('x')
+                    execute(user_input)
+            """,
+        }
+
+        tmp_dir = str(tmp_path)
+        gst = GlobalSymbolTable(root_dir=tmp_dir)
+        for name, code in files.items():
+            path = str(tmp_path / name)
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
+            parser = PyASTParser(path)
+            tree = parser.parse()
+            gst.register_file(path, tree)
+
+        main_path = str(tmp_path / "main.py")
+        parser = PyASTParser(main_path)
+        parser.parse()
+        cfg = parser.extract_cfg()
+
+        tracker = TaintTracker(
+            sources=["request", "req", "request.args", "req.args"],
+            sinks=["os.system"],
+            sanitizers=["html.escape"],
+            symbol_table=gst,
+            max_call_depth=3,
+        )
+        tracker.analyze_cfg(cfg, filepath=main_path)
+
+        findings = tracker.get_findings()
+        assert len(findings) == 0
 
     def test_cross_module_module_alias(self, tmp_path):
         """
@@ -269,7 +381,9 @@ class TestCrossModuleTaint:
         gst = GlobalSymbolTable(root_dir=tmp_dir)
         for name, code in files.items():
             path = str(tmp_path / name)
-            (tmp_path / name).write_text(textwrap.dedent(code).lstrip("\n"), encoding="utf-8")
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
             parser = PyASTParser(path)
             tree = parser.parse()
             gst.register_file(path, tree)
@@ -288,7 +402,9 @@ class TestCrossModuleTaint:
         tracker.analyze_cfg(cfg, filepath=app_path)
 
         findings = tracker.get_findings()
-        assert len(findings) >= 1, "Should resolve module alias u.get_data -> utils.get_data"
+        assert (
+            len(findings) >= 1
+        ), "Should resolve module alias u.get_data -> utils.get_data"
 
     def test_cross_module_no_false_positive_on_safe_return(self, tmp_path):
         """
@@ -315,7 +431,9 @@ class TestCrossModuleTaint:
         gst = GlobalSymbolTable(root_dir=tmp_dir)
         for name, code in files.items():
             path = str(tmp_path / name)
-            (tmp_path / name).write_text(textwrap.dedent(code).lstrip("\n"), encoding="utf-8")
+            (tmp_path / name).write_text(
+                textwrap.dedent(code).lstrip("\n"), encoding="utf-8"
+            )
             parser = PyASTParser(path)
             tree = parser.parse()
             gst.register_file(path, tree)
@@ -515,9 +633,9 @@ class TestImportMapResolution:
         tracker.analyze_cfg(cfg, filepath=app_path)
 
         findings = tracker.get_findings()
-        assert len(findings) >= 1, (
-            "import_map should resolve u.get_cmd -> utils.get_cmd via module alias"
-        )
+        assert (
+            len(findings) >= 1
+        ), "import_map should resolve u.get_cmd -> utils.get_cmd via module alias"
 
     def test_import_map_cache_avoids_reanalysis(self, tmp_path):
         """Calling analyze_cfg twice on the same file should not duplicate findings."""
