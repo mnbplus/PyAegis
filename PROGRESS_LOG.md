@@ -2,6 +2,26 @@
 
 ---
 
+## 2026-03-16 09:34 (Asia/Shanghai)
+
+**完成内容：**
+- 全面审查 ROADMAP：确认 P0（跨模块调用图）、P1（框架感知 Source）、P2（条件约束规则引擎）、P3（LLM Auto-Remediation）、P4（增量分析缓存）均已实现，275 个测试全部通过，零回归
+- 清理项目根目录遗留的 11 个调试/临时脚本（`build_taint.py`、`write_taint.py`、`bytes_check.py` 等），删除约 947 行无效代码
+- commit `b0bc9ec` 已 push 到 main
+- 注意：GitHub Dependabot 检测到 1 个 moderate 级依赖漏洞，待处理
+
+**遇到问题：**
+- PowerShell 不支持 `&&` 作为命令分隔符，改用 `workdir` 参数 + 分步执行
+- 部分已删除文件为 untracked（从未 git add），需用 `git add -u` 而非 `git rm` 来 stage 删除
+
+**下一步：**
+- 查看并修复 GitHub Dependabot moderate 漏洞（`pip-audit` 或直接升级依赖）
+- 考虑为 CHANGELOG 补充 v0.3.0 条目，记录 P1-P4 的完整落地
+- 可选：`pyaegis fix` 子命令 CLI 入口（LLMRemediationEngine 已有实现，CLI 尚未暴露）
+- 可选：PRODUCT_RESEARCH.md 产品调研文档
+
+---
+
 ## 2026-03-16 09:20 (Asia/Shanghai)
 
 **完成内容：**
