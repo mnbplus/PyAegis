@@ -18,6 +18,15 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
 ]
 requires-python = ">=3.8"
+license = { text = "MIT" }
+keywords = ["security", "sast", "static-analysis", "taint-analysis", "vulnerability"]
+
+[project.urls]
+Homepage = "https://github.com/mnbplus/PyAegis"
+Repository = "https://github.com/mnbplus/PyAegis"
+Issues = "https://github.com/mnbplus/PyAegis/issues"
+Changelog = "https://github.com/mnbplus/PyAegis/blob/main/CHANGELOG.md"
+
 dependencies = [
     "pyyaml>=6.0.1",
 ]
